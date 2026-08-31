@@ -1,0 +1,36 @@
+services:
+  user-1:
+    build: .
+    image: minikitex:local
+    command: ["/usr/local/bin/user"]
+    hostname: user-1
+    environment:
+      LISTEN: "0.0.0.0:8888"
+      INSTANCE: user-1
+    expose:
+      - "8888"
+
+  user-2:
+    build: .
+    image: minikitex:local
+    command: ["/usr/local/bin/user"]
+    hostname: user-2
+    environment:
+      LISTEN: "0.0.0.0:8888"
+      INSTANCE: user-2
+    expose:
+      - "8888"
+
+  order:
+    build: .
+    image: minikitex:local
+    command: ["/usr/local/bin/order"]
+    hostname: order-1
+    environment:
+      LISTEN: "0.0.0.0:8889"
+      USER_ADDR: "user-1:8888,user-2:8888"
+    ports:
+      - "8889:8889"
+    depends_on:
+      - user-1
+      - user-2

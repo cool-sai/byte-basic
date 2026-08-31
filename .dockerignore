@@ -1,0 +1,9 @@
+.git
+docs
+bin/.gitkeep
+example/py
+example/js
+example/generic
+example/client
+*_test.go
+**/*_test.go

@@ -1,0 +1,27 @@
+# 第二份契约。和 user.idl 平级，各自生成各自的 Go 包。
+
+service OrderService {
+    GetOrder(GetOrderReq) GetOrderResp
+    CreateOrder(CreateOrderReq) CreateOrderResp
+}
+
+struct GetOrderReq {
+    1: i64 id
+}
+
+struct GetOrderResp {
+    1: i64 id
+    2: i64 userId
+    3: string status
+    4: string userName
+}
+
+struct CreateOrderReq {
+    1: i64 userId
+    2: i64 amount
+}
+
+struct CreateOrderResp {
+    1: i64 id
+    2: string status
+}
