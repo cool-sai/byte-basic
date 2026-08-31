@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -21,7 +22,7 @@ func (h Handler) GetUser(_ context.Context, req *user.GetUserReq) (*user.GetUser
 	if !ok {
 		return nil, fmt.Errorf("user %d not found", req.ID)
 	}
-	log.Printf("[%s] GetUser %d -> %s", h.instance, req.ID, name)
+	slog.Info("GetUser", "id", req.ID, "name", name)
 	return &user.GetUserResp{ID: req.ID, Name: name}, nil
 }
 

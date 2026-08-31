@@ -1,11 +1,11 @@
 services:
-  registry:
-    build: .
-    image: minikitex:local
-    command: ["/usr/local/bin/registry"]
-    hostname: registry
-    environment:
-      LISTEN: "0.0.0.0:8500"
+  consul:
+    build:
+      context: .
+      dockerfile: Dockerfile.consul
+    image: minikitex-consul:local
+    hostname: consul
+    command: ["agent", "-dev", "-client=0.0.0.0", "-bind=0.0.0.0", "-ui"]
     ports:
       - "8500:8500"
 
@@ -17,13 +17,16 @@ services:
     environment:
       LISTEN: "0.0.0.0:8888"
       INSTANCE: user-1
-      REGISTRY: "http://registry:8500"
+      REGISTRY: "http://consul:8500"
       SERVICE_NAME: "user"
       ADVERTISE: "user-1:8888"
+      PSM: "user"
+    labels:
+      psm: user
     expose:
       - "8888"
     depends_on:
-      - registry
+      - consul
 
   user-2:
     build: .
@@ -33,13 +36,16 @@ services:
     environment:
       LISTEN: "0.0.0.0:8888"
       INSTANCE: user-2
-      REGISTRY: "http://registry:8500"
+      REGISTRY: "http://consul:8500"
       SERVICE_NAME: "user"
       ADVERTISE: "user-2:8888"
+      PSM: "user"
+    labels:
+      psm: user
     expose:
       - "8888"
     depends_on:
-      - registry
+      - consul
 
   order:
     build: .
@@ -48,11 +54,43 @@ services:
     hostname: order-1
     environment:
       LISTEN: "0.0.0.0:8889"
-      REGISTRY: "http://registry:8500"
+      INSTANCE: order-1
+      REGISTRY: "http://consul:8500"
       SERVICE_NAME: "user"
+      PSM: "order"
+    labels:
+      psm: order
     ports:
       - "8889:8889"
     depends_on:
-      - registry
+      - consul
       - user-1
       - user-2
+
+  loki:
+    image: grafana/loki:2.9.8
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./observability/promtail.yml:/etc/promtail/config.yml:ro
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
+    depends_on:
+      - loki

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -57,7 +58,7 @@ func (h *Handler) GetOrder(ctx context.Context, req *order.GetOrderReq) (*order.
 	if p == nil {
 		return nil, fmt.Errorf("no user instances")
 	}
-	log.Printf("GetOrder %d -> RPC user.GetUser(%d) via %s", o.id, o.userID, p.addr)
+	slog.Info("GetOrder", "id", o.id, "userId", o.userID, "via", p.addr)
 	u, err := p.cli.GetUser(ctx, &user.GetUserReq{ID: o.userID})
 	if err != nil {
 		return nil, err

@@ -10,5 +10,15 @@ esac
 go build -o bin/user ./example/server
 go build -o bin/order ./example/order
 go build -o bin/order-client ./example/order_client
-go build -o bin/registry ./example/registry
-exec docker compose up --build "$@"
+
+ver=1.20.5
+if [ ! -x bin/consul ]; then
+  zip=/tmp/consul_${ver}.zip
+  url="https://releases.hashicorp.com/consul/${ver}/consul_${ver}_linux_${GOARCH}.zip"
+  echo "downloading $url"
+  curl -fsSL -o "$zip" "$url"
+  unzip -o -d bin "$zip" consul
+  chmod +x bin/consul
+fi
+
+exec docker compose up --build --remove-orphans "$@"

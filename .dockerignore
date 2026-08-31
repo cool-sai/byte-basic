@@ -1,5 +1,6 @@
 .git
 docs
+observability
 bin/.gitkeep
 example/py
 example/js

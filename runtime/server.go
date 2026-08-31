@@ -2,9 +2,23 @@ package runtime
 
 import (
 	"context"
+	"log/slog"
 	"net"
+	"os"
 	"sync"
 )
+
+func init() {
+	inst := os.Getenv("INSTANCE")
+	if inst == "" {
+		inst, _ = os.Hostname()
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("instance", inst)
+	if psm := os.Getenv("PSM"); psm != "" {
+		logger = logger.With("psm", psm)
+	}
+	slog.SetDefault(logger)
+}
 
 type HandlerFunc func(ctx context.Context, body []byte) ([]byte, error)
 
@@ -61,9 +75,11 @@ func (s *Server) serve(conn net.Conn) {
 		}
 		body, err := h(context.Background(), msg.body)
 		if err != nil {
+			slog.Error("rpc", "method", msg.method, "seq", msg.seq, "err", err)
 			_ = writeMsg(conn, MsgException, msg.seq, msg.method, []byte(err.Error()))
 			continue
 		}
+		slog.Info("rpc", "method", msg.method, "seq", msg.seq)
 		_ = writeMsg(conn, MsgReply, msg.seq, msg.method, body)
 	}
 }
