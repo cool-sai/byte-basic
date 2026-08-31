@@ -1,4 +1,14 @@
 services:
+  registry:
+    build: .
+    image: minikitex:local
+    command: ["/usr/local/bin/registry"]
+    hostname: registry
+    environment:
+      LISTEN: "0.0.0.0:8500"
+    ports:
+      - "8500:8500"
+
   user-1:
     build: .
     image: minikitex:local
@@ -7,8 +17,13 @@ services:
     environment:
       LISTEN: "0.0.0.0:8888"
       INSTANCE: user-1
+      REGISTRY: "http://registry:8500"
+      SERVICE_NAME: "user"
+      ADVERTISE: "user-1:8888"
     expose:
       - "8888"
+    depends_on:
+      - registry
 
   user-2:
     build: .
@@ -18,8 +33,13 @@ services:
     environment:
       LISTEN: "0.0.0.0:8888"
       INSTANCE: user-2
+      REGISTRY: "http://registry:8500"
+      SERVICE_NAME: "user"
+      ADVERTISE: "user-2:8888"
     expose:
       - "8888"
+    depends_on:
+      - registry
 
   order:
     build: .
@@ -28,9 +48,11 @@ services:
     hostname: order-1
     environment:
       LISTEN: "0.0.0.0:8889"
-      USER_ADDR: "user-1:8888,user-2:8888"
+      REGISTRY: "http://registry:8500"
+      SERVICE_NAME: "user"
     ports:
       - "8889:8889"
     depends_on:
+      - registry
       - user-1
       - user-2

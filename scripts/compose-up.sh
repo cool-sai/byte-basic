@@ -10,4 +10,5 @@ esac
 go build -o bin/user ./example/server
 go build -o bin/order ./example/order
 go build -o bin/order-client ./example/order_client
+go build -o bin/registry ./example/registry
 exec docker compose up --build "$@"

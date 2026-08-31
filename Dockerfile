@@ -4,3 +4,4 @@ FROM scratch
 COPY bin/user /usr/local/bin/user
 COPY bin/order /usr/local/bin/order
 COPY bin/order-client /usr/local/bin/order-client
+COPY bin/registry /usr/local/bin/registry

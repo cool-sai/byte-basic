@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
+	"minikitex/discovery"
 	"minikitex/gen/user"
 )
 
@@ -33,8 +35,26 @@ func main() {
 		instance, _ = os.Hostname()
 	}
 	addr := getenv("LISTEN", "127.0.0.1:8888")
+	if os.Getenv("REGISTRY") != "" {
+		go announce(instance)
+	}
 	log.Println("user server", instance, "listening", addr)
 	log.Fatal(user.NewServer(Handler{instance: instance}).ListenAndServe(addr))
+}
+
+func announce(instance string) {
+	base := os.Getenv("REGISTRY")
+	name := getenv("SERVICE_NAME", "user")
+	advertise := os.Getenv("ADVERTISE")
+	if advertise == "" {
+		advertise = instance + ":8888"
+	}
+	for {
+		if err := discovery.Register(base, name, advertise); err != nil {
+			log.Println("register:", err)
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
 
 func getenv(k, def string) string {
