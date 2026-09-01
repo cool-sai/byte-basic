@@ -1,1 +1,4 @@
 /bin/
+/artifacts/
+platform/web/node_modules
+platform/web/dist

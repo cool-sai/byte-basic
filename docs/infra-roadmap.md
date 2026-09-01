@@ -1,6 +1,6 @@
 # 本地模拟基建（以后按步做）
 
-当前做到第 8 步：HTTP 网关把 JSON 转成 order 的 RPC，浏览器/curl 不用直接打 TCP。
+当前做到第 8 步 + 基建控制台：SCM 编译出版本、BAM 托管 IDL、AGW 按注解开通 HTTP、部署页选版本发布。第 9 步消息队列还没做。
 
 Docker Compose 是 Docker 的「一次起一堆容器」工具：`docker-compose.yml` 里写镜像、端口、环境变量，`docker compose up` 一起起来。容器之间用服务名当地址（`user-1:8888`），不用写 `127.0.0.1`。它还不是 K8s，也不是服务发现。
 
@@ -150,3 +150,25 @@ docker compose restart gateway
 # 改 order 代码：只发 order
 ./scripts/compose-up.sh -d order
 ```
+
+## 基建控制台（SCM / BAM / AGW / 部署）
+
+本机没有独立 MySQL，用 compose 里的 `mysql`（root / minikitex，库 `minikitex`）。控制台「MySQL」页看表结构；或 http://127.0.0.1:18081 Adminer。更好看用桌面客户端连 `127.0.0.1:3306`（DBeaver / Sequel Ace / TablePlus）。
+
+```bash
+docker compose up -d mysql
+go run ./platform/server          # :8081
+# 另一个终端
+cd platform/web && npm install && npm run dev
+open http://127.0.0.1:5173
+```
+
+| 页 | 对应线上 | 实际做什么 |
+|---|---|---|
+| SCM 编译 | SCM 出制品 | `go build` linux 二进制，落到 `artifacts/<服务>/<版本>/` |
+| BAM IDL | BAM 托管契约 | 编辑 `idl/*.thrift`，解析 agw.uri 和入参/出参 |
+| AGW 网关 | AGW 开通 HTTP | 重启 gateway，让它重新读挂载的 IDL |
+| 部署 | 发布平台选版本 | 拷制品到 `bin/`，`compose build` + `up --no-deps` |
+
+改 URL：BAM 改 `agw.uri` 保存 → AGW 点发布。不用重编 order。
+改代码：SCM 编译 → 部署选这个版本。

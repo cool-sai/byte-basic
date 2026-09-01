@@ -1,0 +1,9 @@
+@import "tailwindcss";
+@import "@arco-design/web-react/dist/css/arco.css";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}

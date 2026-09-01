@@ -134,7 +134,8 @@ services:
     environment:
       LISTEN: "0.0.0.0:8080"
       ORDER_ADDR: "order:8889"
-      IDL: /idl/order.thrift
+      USER_ADDR: "user-1:8888"
+      IDL_DIR: /idl
       INSTANCE: gateway-1
       PSM: "gateway"
     labels:
@@ -182,6 +183,33 @@ services:
       - user-2
       - order
 
+  mysql:
+    image: mysql:8.0.40
+    hostname: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: minikitex
+      MYSQL_DATABASE: minikitex
+    ports:
+      - "3306:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pminikitex"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  adminer:
+    image: adminer:4.8.1
+    environment:
+      ADMINER_DEFAULT_SERVER: mysql
+    ports:
+      - "18081:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
   grafana:
     image: grafana/grafana:11.4.0
     ports:
@@ -198,3 +226,6 @@ services:
     depends_on:
       - loki
       - prometheus
+
+volumes:
+  mysql-data:

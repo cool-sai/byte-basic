@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,55 +15,102 @@ import (
 	"minikitex/idl"
 )
 
-type gw struct {
+type backend struct {
+	name string
 	addr string
 	spec *idl.Spec
+}
+
+type gw struct {
 	mu   sync.Mutex
-	cli  *generic.Client
+	clis map[string]*generic.Client
 }
 
 func main() {
 	addr := getenv("LISTEN", "127.0.0.1:8080")
-	orderAddr := getenv("ORDER_ADDR", "127.0.0.1:8889")
-	spec, err := idl.ParseFile(getenv("IDL", "idl/order.thrift"))
+	backends, err := loadBackends()
 	if err != nil {
 		log.Fatal(err)
 	}
-	cli, err := dialOrder(orderAddr, spec)
-	if err != nil {
-		log.Fatal(err)
-	}
-	g := &gw{addr: orderAddr, spec: spec, cli: cli}
-
+	g := &gw{clis: map[string]*generic.Client{}}
 	mux := http.NewServeMux()
-	for _, m := range spec.Methods {
-		if m.URI == "" {
-			continue
+	for _, b := range backends {
+		if err := g.ensure(b); err != nil {
+			log.Fatal(b.name, err)
 		}
-		httpMethod := m.HTTPMethod
-		if httpMethod == "" {
-			httpMethod = "POST"
+		for _, m := range b.spec.Methods {
+			if m.URI == "" {
+				continue
+			}
+			httpMethod := m.HTTPMethod
+			if httpMethod == "" {
+				httpMethod = "POST"
+			}
+			pattern := httpMethod + " " + m.URI
+			bb, rpcMethod := b, m.Name
+			mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+				g.handle(w, r, bb, rpcMethod)
+			})
+			log.Println(pattern, "->", b.name+"."+rpcMethod)
 		}
-		pattern := httpMethod + " " + m.URI
-		rpcMethod := m.Name
-		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			g.handle(w, r, rpcMethod)
-		})
-		log.Println(pattern, "->", rpcMethod)
 	}
-
-	log.Println("gateway", addr, "->", orderAddr)
+	log.Println("gateway", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
 
-func (g *gw) handle(w http.ResponseWriter, r *http.Request, method string) {
+func loadBackends() ([]*backend, error) {
+	if one := os.Getenv("IDL"); one != "" {
+		spec, err := idl.ParseFile(one)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSuffix(filepath.Base(one), filepath.Ext(one))
+		return []*backend{{name: name, addr: addrFor(name), spec: spec}}, nil
+	}
+	dir := getenv("IDL_DIR", "idl")
+	matches, err := filepath.Glob(filepath.Join(dir, "*.thrift"))
+	if err != nil {
+		return nil, err
+	}
+	var out []*backend
+	for _, path := range matches {
+		spec, err := idl.ParseFile(path)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		hasHTTP := false
+		for _, m := range spec.Methods {
+			if m.URI != "" {
+				hasHTTP = true
+				break
+			}
+		}
+		if !hasHTTP {
+			continue
+		}
+		out = append(out, &backend{name: name, addr: addrFor(name), spec: spec})
+	}
+	return out, nil
+}
+
+func addrFor(name string) string {
+	env := strings.ToUpper(name) + "_ADDR"
+	def := "127.0.0.1:8889"
+	if name == "user" {
+		def = "127.0.0.1:8888"
+	}
+	return getenv(env, def)
+}
+
+func (g *gw) handle(w http.ResponseWriter, r *http.Request, b *backend, method string) {
 	body := map[string]any{}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
 		writeErr(w, 400, err)
 		return
 	}
 	var resp any
-	err := g.rpc(func(cli *generic.Client) error {
+	err := g.call(b, func(cli *generic.Client) error {
 		var e error
 		resp, e = cli.Call(r.Context(), method, body)
 		return e
@@ -73,27 +122,49 @@ func (g *gw) handle(w http.ResponseWriter, r *http.Request, method string) {
 	writeJSON(w, resp)
 }
 
-func (g *gw) rpc(fn func(*generic.Client) error) error {
+func (g *gw) call(b *backend, fn func(*generic.Client) error) error {
+	if err := g.ensure(b); err != nil {
+		return err
+	}
 	g.mu.Lock()
-	cli := g.cli
+	cli := g.clis[b.addr]
 	g.mu.Unlock()
 	err := fn(cli)
 	if err == nil {
 		return nil
 	}
-	ncli, dialErr := generic.Dial(g.addr, g.spec)
+	ncli, dialErr := generic.Dial(b.addr, b.spec)
 	if dialErr != nil {
 		return err
 	}
 	g.mu.Lock()
-	old := g.cli
-	g.cli = ncli
+	old := g.clis[b.addr]
+	g.clis[b.addr] = ncli
 	g.mu.Unlock()
-	_ = old.Close()
+	if old != nil {
+		_ = old.Close()
+	}
 	return fn(ncli)
 }
 
-func dialOrder(addr string, spec *idl.Spec) (*generic.Client, error) {
+func (g *gw) ensure(b *backend) error {
+	g.mu.Lock()
+	if g.clis[b.addr] != nil {
+		g.mu.Unlock()
+		return nil
+	}
+	g.mu.Unlock()
+	cli, err := dial(b.addr, b.spec)
+	if err != nil {
+		return err
+	}
+	g.mu.Lock()
+	g.clis[b.addr] = cli
+	g.mu.Unlock()
+	return nil
+}
+
+func dial(addr string, spec *idl.Spec) (*generic.Client, error) {
 	var last error
 	for i := 0; i < 50; i++ {
 		cli, err := generic.Dial(addr, spec)
