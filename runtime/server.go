@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 )
 
 func init() {
@@ -38,6 +39,9 @@ func (s *Server) Handle(method string, h HandlerFunc) {
 }
 
 func (s *Server) ListenAndServe(addr string) error {
+	if m := os.Getenv("METRICS"); m != "" {
+		go serveMetrics(m)
+	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -69,16 +73,20 @@ func (s *Server) serve(conn net.Conn) {
 		s.mu.RLock()
 		h := s.handlers[msg.method]
 		s.mu.RUnlock()
+		start := time.Now()
 		if h == nil {
+			observeRPC(msg.method, "error", time.Since(start))
 			_ = writeMsg(conn, MsgException, msg.seq, msg.method, []byte("unknown method "+msg.method))
 			continue
 		}
 		body, err := h(context.Background(), msg.body)
 		if err != nil {
+			observeRPC(msg.method, "error", time.Since(start))
 			slog.Error("rpc", "method", msg.method, "seq", msg.seq, "err", err)
 			_ = writeMsg(conn, MsgException, msg.seq, msg.method, []byte(err.Error()))
 			continue
 		}
+		observeRPC(msg.method, "ok", time.Since(start))
 		slog.Info("rpc", "method", msg.method, "seq", msg.seq)
 		_ = writeMsg(conn, MsgReply, msg.seq, msg.method, body)
 	}

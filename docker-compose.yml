@@ -21,10 +21,12 @@ services:
       SERVICE_NAME: "user"
       ADVERTISE: "user-1:8888"
       PSM: "user"
+      METRICS: "0.0.0.0:9091"
     labels:
       psm: user
     expose:
       - "8888"
+      - "9091"
     depends_on:
       - consul
 
@@ -40,10 +42,12 @@ services:
       SERVICE_NAME: "user"
       ADVERTISE: "user-2:8888"
       PSM: "user"
+      METRICS: "0.0.0.0:9091"
     labels:
       psm: user
     expose:
       - "8888"
+      - "9091"
     depends_on:
       - consul
 
@@ -58,10 +62,13 @@ services:
       REGISTRY: "http://consul:8500"
       SERVICE_NAME: "user"
       PSM: "order"
+      METRICS: "0.0.0.0:9091"
     labels:
       psm: order
     ports:
       - "8889:8889"
+    expose:
+      - "9091"
     depends_on:
       - consul
       - user-1
@@ -82,6 +89,20 @@ services:
     depends_on:
       - loki
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=6h
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - user-1
+      - user-2
+      - order
+
   grafana:
     image: grafana/grafana:11.4.0
     ports:
@@ -89,8 +110,12 @@ services:
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
-      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - ./observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
+      - ./observability/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./observability/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - loki
+      - prometheus

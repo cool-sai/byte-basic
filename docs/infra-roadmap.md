@@ -1,6 +1,6 @@
 # 本地模拟基建（以后按步做）
 
-当前做到第 4 步：JSON 日志 + Loki 检索。进程打到 stdout，Promtail 采集，Grafana 查询。
+当前做到第 5 步：Prometheus 刮 `/metrics`，Grafana 看板看 QPS / 延迟 / 错误。
 
 Docker Compose 是 Docker 的「一次起一堆容器」工具：`docker-compose.yml` 里写镜像、端口、环境变量，`docker compose up` 一起起来。容器之间用服务名当地址（`user-1:8888`），不用写 `127.0.0.1`。它还不是 K8s，也不是服务发现。
 
@@ -66,7 +66,7 @@ docker compose stop user-2
 
 本机 `go run` 不设 `REGISTRY`，仍走 `USER_ADDR`。
 
-## 第 4 步怎么跑（当前）
+## 第 4 步怎么跑
 
 ```bash
 ./scripts/compose-up.sh -d
@@ -75,7 +75,7 @@ docker compose logs --tail=20 order user-1
 open http://127.0.0.1:3000
 ```
 
-Grafana 已开匿名登录。Explore → Loki：
+Grafana 可匿名看；收藏要登录 `admin` / `admin`。Explore → Loki：
 
 - `{psm="user"}` — user 服务全部实例（和内部按 PSM 查一样）
 - `{psm="user",instance="user-1"}` — 某一台
@@ -84,3 +84,21 @@ Grafana 已开匿名登录。Explore → Loki：
 JSON 里也有 `psm` / `instance` 字段。
 
 进程仍然只写 stderr；Promtail 从 Docker 日志里抄走。Loki 挂了不影响 RPC。
+
+## 第 5 步怎么跑（当前）
+
+```bash
+./scripts/compose-up.sh -d
+# 打几次流量，否则图是空的
+for i in 1 2 3 4 5; do go run ./example/order_client; done
+open http://127.0.0.1:3000/d/rpc/rpc
+# 或 Prometheus：http://127.0.0.1:9090
+# Explore → Prometheus：rate(rpc_requests_total[30s])
+```
+
+每个 RPC 进程另开 HTTP `:9091/metrics`（Prometheus 文本格式）。Prometheus 按 `psm` / `instance` 贴标签来刮，和日志那套一样。
+
+- `rpc_requests_total{method,status}` — 次数（QPS 用 `rate()`）
+- `rpc_request_duration_seconds` — 延迟直方图（p99 用 `histogram_quantile`）
+
+进程不主动推指标；Prometheus 来拉。Prometheus 挂了不影响 RPC。
