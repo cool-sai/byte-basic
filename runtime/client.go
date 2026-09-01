@@ -35,7 +35,9 @@ func (c *Client) Call(ctx context.Context, method string, body []byte) ([]byte, 
 		defer c.conn.SetDeadline(time.Time{})
 	}
 
-	if err := writeMsg(c.conn, MsgCall, seq, method, body); err != nil {
+	if err := writeFrame(c.conn, message{
+		typ: MsgCall, seq: seq, method: method, hdr: outgoingHdr(ctx), body: body,
+	}); err != nil {
 		return nil, err
 	}
 	msg, err := readMsg(c.conn)

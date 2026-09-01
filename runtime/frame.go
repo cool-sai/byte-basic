@@ -17,19 +17,29 @@ type message struct {
 	typ    byte
 	seq    uint32
 	method string
+	hdr    []byte
 	body   []byte
 }
 
 func writeMsg(w io.Writer, typ byte, seq uint32, method string, body []byte) error {
-	mb := []byte(method)
-	n := 1 + 4 + 2 + len(mb) + len(body)
+	return writeFrame(w, message{typ: typ, seq: seq, method: method, body: body})
+}
+
+func writeFrame(w io.Writer, msg message) error {
+	mb := []byte(msg.method)
+	n := 1 + 4 + 2 + len(mb) + 2 + len(msg.hdr) + len(msg.body)
 	buf := make([]byte, 4+n)
 	binary.BigEndian.PutUint32(buf[0:4], uint32(n))
-	buf[4] = typ
-	binary.BigEndian.PutUint32(buf[5:9], seq)
+	buf[4] = msg.typ
+	binary.BigEndian.PutUint32(buf[5:9], msg.seq)
 	binary.BigEndian.PutUint16(buf[9:11], uint16(len(mb)))
 	copy(buf[11:11+len(mb)], mb)
-	copy(buf[11+len(mb):], body)
+	off := 11 + len(mb)
+	binary.BigEndian.PutUint16(buf[off:off+2], uint16(len(msg.hdr)))
+	off += 2
+	copy(buf[off:], msg.hdr)
+	off += len(msg.hdr)
+	copy(buf[off:], msg.body)
 	_, err := w.Write(buf)
 	return err
 }
@@ -40,7 +50,7 @@ func readMsg(r io.Reader) (message, error) {
 		return message{}, err
 	}
 	n := binary.BigEndian.Uint32(hdr[:])
-	if n < 7 || n > maxFrame {
+	if n < 9 || n > maxFrame {
 		return message{}, fmt.Errorf("runtime: bad frame %d", n)
 	}
 	buf := make([]byte, n)
@@ -50,13 +60,25 @@ func readMsg(r io.Reader) (message, error) {
 	typ := buf[0]
 	seq := binary.BigEndian.Uint32(buf[1:5])
 	mlen := int(binary.BigEndian.Uint16(buf[5:7]))
-	if 7+mlen > len(buf) {
+	if 7+mlen+2 > len(buf) {
 		return message{}, fmt.Errorf("runtime: short method")
 	}
+	off := 7 + mlen
+	hlen := int(binary.BigEndian.Uint16(buf[off : off+2]))
+	off += 2
+	if off+hlen > len(buf) {
+		return message{}, fmt.Errorf("runtime: short hdr")
+	}
+	var meta []byte
+	if hlen > 0 {
+		meta = buf[off : off+hlen]
+	}
+	off += hlen
 	return message{
 		typ:    typ,
 		seq:    seq,
 		method: string(buf[7 : 7+mlen]),
-		body:   buf[7+mlen:],
+		hdr:    meta,
+		body:   buf[off:],
 	}, nil
 }

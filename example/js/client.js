@@ -69,12 +69,13 @@ function call(sock, seq, method, req) {
   const spec = IDL[method];
   const body = encodeStruct(spec.req, req);
   const mb = Buffer.from(method);
-  const msg = Buffer.alloc(1 + 4 + 2 + mb.length + body.length);
+  const msg = Buffer.alloc(1 + 4 + 2 + mb.length + 2 + body.length);
   msg[0] = MSG_CALL;
   msg.writeUInt32BE(seq, 1);
   msg.writeUInt16BE(mb.length, 5);
   mb.copy(msg, 7);
-  body.copy(msg, 7 + mb.length);
+  msg.writeUInt16BE(0, 7 + mb.length);
+  body.copy(msg, 7 + mb.length + 2);
   const frame = Buffer.alloc(4 + msg.length);
   frame.writeUInt32BE(msg.length, 0);
   msg.copy(frame, 4);
@@ -83,7 +84,8 @@ function call(sock, seq, method, req) {
   return readFrame(sock).then((raw) => {
     const typ = raw[0];
     const mlen = raw.readUInt16BE(5);
-    const rbody = raw.slice(7 + mlen);
+    const hlen = raw.readUInt16BE(7 + mlen);
+    const rbody = raw.slice(7 + mlen + 2 + hlen);
     if (typ === MSG_EX) throw new Error(rbody.toString());
     return decodeStruct(spec.resp, rbody);
   });

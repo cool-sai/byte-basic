@@ -22,6 +22,7 @@ services:
       ADVERTISE: "user-1:8888"
       PSM: "user"
       METRICS: "0.0.0.0:9091"
+      JAEGER: "http://jaeger:9411/api/v2/spans"
     labels:
       psm: user
     expose:
@@ -29,6 +30,7 @@ services:
       - "9091"
     depends_on:
       - consul
+      - jaeger
 
   user-2:
     build: .
@@ -43,6 +45,7 @@ services:
       ADVERTISE: "user-2:8888"
       PSM: "user"
       METRICS: "0.0.0.0:9091"
+      JAEGER: "http://jaeger:9411/api/v2/spans"
     labels:
       psm: user
     expose:
@@ -50,6 +53,7 @@ services:
       - "9091"
     depends_on:
       - consul
+      - jaeger
 
   order:
     build: .
@@ -63,6 +67,7 @@ services:
       SERVICE_NAME: "user"
       PSM: "order"
       METRICS: "0.0.0.0:9091"
+      JAEGER: "http://jaeger:9411/api/v2/spans"
     labels:
       psm: order
     ports:
@@ -73,6 +78,14 @@ services:
       - consul
       - user-1
       - user-2
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+    ports:
+      - "16686:16686"
 
   loki:
     image: grafana/loki:2.9.8

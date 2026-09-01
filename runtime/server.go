@@ -2,12 +2,15 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"os"
 	"sync"
 	"time"
 )
+
+var errUnknownMethod = errors.New("unknown method")
 
 func init() {
 	inst := os.Getenv("INSTANCE")
@@ -74,20 +77,24 @@ func (s *Server) serve(conn net.Conn) {
 		h := s.handlers[msg.method]
 		s.mu.RUnlock()
 		start := time.Now()
+		ctx, sp := startSpan(msg.method, msg.hdr)
 		if h == nil {
 			observeRPC(msg.method, "error", time.Since(start))
+			sp.finish(errUnknownMethod)
 			_ = writeMsg(conn, MsgException, msg.seq, msg.method, []byte("unknown method "+msg.method))
 			continue
 		}
-		body, err := h(context.Background(), msg.body)
+		body, err := h(ctx, msg.body)
 		if err != nil {
 			observeRPC(msg.method, "error", time.Since(start))
-			slog.Error("rpc", "method", msg.method, "seq", msg.seq, "err", err)
+			sp.finish(err)
+			slog.Error("rpc", "method", msg.method, "seq", msg.seq, "trace", sp.hexTrace(), "err", err)
 			_ = writeMsg(conn, MsgException, msg.seq, msg.method, []byte(err.Error()))
 			continue
 		}
 		observeRPC(msg.method, "ok", time.Since(start))
-		slog.Info("rpc", "method", msg.method, "seq", msg.seq)
+		sp.finish(nil)
+		slog.Info("rpc", "method", msg.method, "seq", msg.seq, "trace", sp.hexTrace())
 		_ = writeMsg(conn, MsgReply, msg.seq, msg.method, body)
 	}
 }

@@ -92,13 +92,14 @@ class Client:
         body = encode_struct(spec["req"], req)
         self.seq += 1
         mb = method.encode()
-        msg = struct.pack(">BIH", MSG_CALL, self.seq, len(mb)) + mb + body
+        msg = struct.pack(">BIH", MSG_CALL, self.seq, len(mb)) + mb + struct.pack(">H", 0) + body
         self.sock.sendall(struct.pack(">I", len(msg)) + msg)
         hdr = recvall(self.sock, 4)
         n = struct.unpack(">I", hdr)[0]
         raw = recvall(self.sock, n)
         typ, seq, mlen = struct.unpack_from(">BIH", raw, 0)
-        rbody = raw[7 + mlen :]
+        hlen = struct.unpack_from(">H", raw, 7 + mlen)[0]
+        rbody = raw[7 + mlen + 2 + hlen :]
         if typ == MSG_EX:
             raise RuntimeError(rbody.decode())
         return decode_struct(spec["resp"], rbody)

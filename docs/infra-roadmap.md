@@ -1,6 +1,6 @@
 # 本地模拟基建（以后按步做）
 
-当前做到第 5 步：Prometheus 刮 `/metrics`，Grafana 看板看 QPS / 延迟 / 错误。
+当前做到第 6 步：一次 GetOrder 在 Jaeger 里能看到 order → user 两条 span。
 
 Docker Compose 是 Docker 的「一次起一堆容器」工具：`docker-compose.yml` 里写镜像、端口、环境变量，`docker compose up` 一起起来。容器之间用服务名当地址（`user-1:8888`），不用写 `127.0.0.1`。它还不是 K8s，也不是服务发现。
 
@@ -85,7 +85,7 @@ JSON 里也有 `psm` / `instance` 字段。
 
 进程仍然只写 stderr；Promtail 从 Docker 日志里抄走。Loki 挂了不影响 RPC。
 
-## 第 5 步怎么跑（当前）
+## 第 5 步怎么跑
 
 ```bash
 ./scripts/compose-up.sh -d
@@ -102,3 +102,17 @@ open http://127.0.0.1:3000/d/rpc/rpc
 - `rpc_request_duration_seconds` — 延迟直方图（p99 用 `histogram_quantile`）
 
 进程不主动推指标；Prometheus 来拉。Prometheus 挂了不影响 RPC。
+
+## 第 6 步怎么跑（当前）
+
+```bash
+./scripts/compose-up.sh -d
+go run ./example/order_client
+open http://127.0.0.1:16686
+```
+
+Jaeger → Service `order` → Find Traces。一条 GetOrder 下面挂一条 GetUser，同一个 `trace` id。
+
+RPC 帧在 method 和 body 之间加了 2 字节 header 长度：有上游就把 `traceID(16) + parentSpanID(8)` 塞进去。order 处理完调 user 时，把当前 span 当 parent 写进帧。Jaeger 挂了只是不上报，RPC 照跑。
+
+日志 JSON 里也有 `trace` 字段，Loki 可以 `{psm="order"} |= "同一串 hex"`。
