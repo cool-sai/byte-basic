@@ -1,6 +1,6 @@
 # 本地模拟基建（以后按步做）
 
-当前做到第 7 步：环境变量是启动时的底，etcd 里改 `user/name_suffix` 不用重启，下次 RPC 就生效。
+当前做到第 8 步：HTTP 网关把 JSON 转成 order 的 RPC，浏览器/curl 不用直接打 TCP。
 
 Docker Compose 是 Docker 的「一次起一堆容器」工具：`docker-compose.yml` 里写镜像、端口、环境变量，`docker compose up` 一起起来。容器之间用服务名当地址（`user-1:8888`），不用写 `127.0.0.1`。它还不是 K8s，也不是服务发现。
 
@@ -43,7 +43,6 @@ order 日志里有一行 `GetOrder 1001 -> RPC user.GetUser(1)`。
 ## 第 2 步怎么跑（容器化）
 
 ```bash
-chmod +x scripts/compose-up.sh
 ./scripts/compose-up.sh
 # 另一个终端
 go run ./example/order_client
@@ -117,7 +116,7 @@ RPC 帧在 method 和 body 之间加了 2 字节 header 长度：有上游就把
 
 日志 JSON 里也有 `trace` 字段，Loki 可以 `{psm="order"} |= "同一串 hex"`。
 
-## 第 7 步怎么跑（当前）
+## 第 7 步怎么跑
 
 ```bash
 ./scripts/compose-up.sh -d
@@ -128,3 +127,26 @@ go run ./example/order_client          # userName=alice!!!
 ```
 
 没配 `CONFIG` 时只用环境变量 `NAME_SUFFIX`（启动时读一次）。配了就 watch etcd 的 `user/name_suffix`，两个 user 实例一起变，不用滚动重启。etcd 挂了继续用内存里上一次的值。
+
+## 第 8 步怎么跑（当前）
+
+```bash
+./scripts/compose-up.sh -d
+curl -s -d '{"id":1001}' -H 'Content-Type: application/json' http://127.0.0.1:18080/order/get
+curl -s -d '{"userId":1,"amount":99}' -H 'Content-Type: application/json' http://127.0.0.1:18080/order/create
+```
+
+HTTP 路径来自 `idl/order.thrift` 的 `agw.uri`，网关不手写每个接口。内部仍是 RPC。没写 `agw.uri` 的方法（如 user）只走 RPC。`order_client` 还能直接打 8889。
+
+一服务一镜像（`minikitex-user` / `minikitex-order` / `minikitex-gateway`），IDL 挂载进网关，不是编进二进制：
+
+```bash
+# 改 agw.uri：发布 IDL，不用编、不发 order
+docker compose restart gateway
+
+# 改 gateway 代码：只发网关
+./scripts/compose-up.sh -d gateway
+
+# 改 order 代码：只发 order
+./scripts/compose-up.sh -d order
+```

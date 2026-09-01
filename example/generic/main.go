@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	spec, err := idl.ParseFile("idl/user.idl")
+	spec, err := idl.ParseFile("idl/user.thrift")
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -7,6 +7,7 @@ if [ -z "$key" ]; then
   echo "usage: $0 <key> <value>" >&2
   exit 1
 fi
+# etcd v3 HTTP 要求 key/value 都是 base64
 enc() { printf '%s' "$1" | base64 | tr -d '\n'; }
 curl -sf http://127.0.0.1:2379/v3/kv/put \
   -H 'Content-Type: application/json' \

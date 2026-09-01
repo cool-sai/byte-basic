@@ -1,7 +1,6 @@
-# 静态二进制，不依赖 docker hub 上的 golang/alpine（本机拉镜像常失败）。
-# 先编 Linux 包：见 scripts/compose-up.sh
+# 一个服务一份产物：build-arg BIN 决定拷哪个二进制。
+# 先在本机交叉编译：见 scripts/compose-up.sh
 FROM scratch
-COPY bin/user /usr/local/bin/user
-COPY bin/order /usr/local/bin/order
-COPY bin/order-client /usr/local/bin/order-client
-COPY bin/etcdui /usr/local/bin/etcdui
+ARG BIN
+COPY bin/${BIN} /app
+ENTRYPOINT ["/app"]

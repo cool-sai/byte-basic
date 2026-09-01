@@ -33,7 +33,7 @@ func start(t *testing.T) string {
 }
 
 func TestTypedEqualsGenericBytes(t *testing.T) {
-	spec, err := idl.ParseFile("idl/user.idl")
+	spec, err := idl.ParseFile("idl/user.thrift")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestTypedAndGenericHitSameServer(t *testing.T) {
 		t.Fatalf("typed=%+v", tr)
 	}
 
-	spec, err := idl.ParseFile("idl/user.idl")
+	spec, err := idl.ParseFile("idl/user.thrift")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-// Generic Node client: no generated stubs. Field ids come from idl/user.idl.
+// Generic Node client: no generated stubs. Field ids come from idl/user.thrift.
 const net = require("net");
 
 const TSTOP = 0, TBOOL = 1, TI64 = 2, TSTRING = 3;

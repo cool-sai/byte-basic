@@ -30,8 +30,11 @@ services:
       - /data
 
   etcdui:
-    image: minikitex:local
-    command: ["/usr/local/bin/etcdui"]
+    build:
+      context: .
+      args:
+        BIN: etcdui
+    image: minikitex-etcdui:local
     environment:
       LISTEN: "0.0.0.0:2381"
       ETCD: "http://etcd:2379"
@@ -41,9 +44,11 @@ services:
       - etcd
 
   user-1:
-    build: .
-    image: minikitex:local
-    command: ["/usr/local/bin/user"]
+    build:
+      context: .
+      args:
+        BIN: user
+    image: minikitex-user:local
     hostname: user-1
     environment:
       LISTEN: "0.0.0.0:8888"
@@ -66,9 +71,11 @@ services:
       - etcd
 
   user-2:
-    build: .
-    image: minikitex:local
-    command: ["/usr/local/bin/user"]
+    build:
+      context: .
+      args:
+        BIN: user
+    image: minikitex-user:local
     hostname: user-2
     environment:
       LISTEN: "0.0.0.0:8888"
@@ -91,9 +98,11 @@ services:
       - etcd
 
   order:
-    build: .
-    image: minikitex:local
-    command: ["/usr/local/bin/order"]
+    build:
+      context: .
+      args:
+        BIN: order
+    image: minikitex-order:local
     hostname: order-1
     environment:
       LISTEN: "0.0.0.0:8889"
@@ -114,6 +123,28 @@ services:
       - user-1
       - user-2
       - jaeger
+
+  gateway:
+    build:
+      context: .
+      args:
+        BIN: gateway
+    image: minikitex-gateway:local
+    hostname: gateway-1
+    environment:
+      LISTEN: "0.0.0.0:8080"
+      ORDER_ADDR: "order:8889"
+      IDL: /idl/order.thrift
+      INSTANCE: gateway-1
+      PSM: "gateway"
+    labels:
+      psm: gateway
+    volumes:
+      - ./idl:/idl:ro
+    ports:
+      - "18080:8080"
+    depends_on:
+      - order
 
   jaeger:
     image: jaegertracing/all-in-one:1.62.0

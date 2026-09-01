@@ -2,6 +2,7 @@ package idl
 
 import (
 	"bufio"
+	"embed"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,9 @@ import (
 	"unicode"
 )
 
+//go:embed *.thrift
+var Files embed.FS
+
 type Spec struct {
 	Service string
 	Methods []Method
@@ -17,9 +21,11 @@ type Spec struct {
 }
 
 type Method struct {
-	Name string
-	Req  string
-	Resp string
+	Name       string
+	Req        string
+	Resp       string
+	HTTPMethod string // from agw.method; empty = RPC only
+	URI        string // from agw.uri
 }
 
 type Struct struct {
@@ -40,6 +46,14 @@ func ParseFile(path string) (*Spec, error) {
 	}
 	defer f.Close()
 	return Parse(f)
+}
+
+func ParseEmbedded(name string) (*Spec, error) {
+	b, err := Files.ReadFile(name)
+	if err != nil {
+		return nil, err
+	}
+	return ParseString(string(b))
 }
 
 func ParseString(s string) (*Spec, error) {
@@ -63,7 +77,7 @@ func Parse(r io.Reader) (*Spec, error) {
 		if line == "" || line == "{" {
 			continue
 		}
-		if line == "}" {
+		if strings.HasPrefix(line, "}") {
 			state = stTop
 			cur = nil
 			continue
@@ -72,6 +86,9 @@ func Parse(r io.Reader) (*Spec, error) {
 		switch state {
 		case stTop:
 			switch {
+			case strings.HasPrefix(line, "namespace ") || strings.HasPrefix(line, "include ") ||
+				strings.HasPrefix(line, "const ") || strings.HasPrefix(line, "typedef "):
+				continue
 			case strings.HasPrefix(line, "service "):
 				spec.Service = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "service "), "{"))
 				if spec.Service == "" {
@@ -90,11 +107,11 @@ func Parse(r io.Reader) (*Spec, error) {
 				return nil, fmt.Errorf("idl: unexpected %q", line)
 			}
 		case stService:
-			name, req, resp, err := parseMethod(line)
+			m, err := parseMethod(line)
 			if err != nil {
 				return nil, err
 			}
-			spec.Methods = append(spec.Methods, Method{Name: name, Req: req, Resp: resp})
+			spec.Methods = append(spec.Methods, m)
 		case stStruct:
 			f, err := parseField(line)
 			if err != nil {
@@ -206,33 +223,85 @@ func stripComment(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func parseMethod(line string) (name, req, resp string, err error) {
-	line = strings.TrimSpace(strings.TrimSuffix(line, ";"))
+func parseMethod(line string) (Method, error) {
+	line = strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(line, ";"), ","))
+	core, annot := splitAnnot(line)
+	name, req, resp, err := parseMethodCore(core)
+	if err != nil {
+		return Method{}, err
+	}
+	m := Method{Name: name, Req: req, Resp: resp}
+	for k, v := range parseKV(annot) {
+		switch k {
+		case "agw.method":
+			m.HTTPMethod = strings.ToUpper(v)
+		case "agw.uri":
+			m.URI = v
+		}
+	}
+	return m, nil
+}
+
+func parseMethodCore(line string) (name, req, resp string, err error) {
 	i := strings.IndexByte(line, '(')
-	j := strings.IndexByte(line, ')')
+	j := strings.LastIndexByte(line, ')')
 	if i < 1 || j < i {
 		return "", "", "", fmt.Errorf("idl: bad method %q", line)
 	}
-	name = strings.TrimSpace(line[:i])
-	req = strings.TrimSpace(line[i+1 : j])
-	resp = strings.TrimSpace(line[j+1:])
+	before := strings.Fields(strings.TrimSpace(line[:i]))
+	inside := strings.TrimSpace(line[i+1 : j])
+	after := strings.TrimSpace(line[j+1:])
+	req, err = parseReqType(inside)
+	if err != nil {
+		return "", "", "", fmt.Errorf("idl: bad method %q", line)
+	}
+	switch len(before) {
+	case 1:
+		name, resp = before[0], after
+	case 2:
+		resp, name = before[0], before[1]
+	default:
+		return "", "", "", fmt.Errorf("idl: bad method %q", line)
+	}
 	if name == "" || req == "" || resp == "" {
 		return "", "", "", fmt.Errorf("idl: bad method %q", line)
 	}
 	return name, req, resp, nil
 }
 
+func parseReqType(inside string) (string, error) {
+	inside = strings.TrimSpace(inside)
+	if inside == "" {
+		return "", fmt.Errorf("empty req")
+	}
+	if colon := strings.IndexByte(inside, ':'); colon >= 0 {
+		rest := strings.Fields(strings.TrimSpace(inside[colon+1:]))
+		if len(rest) < 1 {
+			return "", fmt.Errorf("empty req")
+		}
+		return rest[0], nil
+	}
+	return inside, nil
+}
+
 func parseField(line string) (Field, error) {
-	line = strings.TrimSpace(strings.TrimSuffix(line, ";"))
-	colon := strings.IndexByte(line, ':')
+	line = strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(line, ";"), ","))
+	core, _ := splitAnnot(line)
+	if i := strings.Index(core, "="); i >= 0 {
+		core = strings.TrimSpace(core[:i])
+	}
+	colon := strings.IndexByte(core, ':')
 	if colon < 1 {
 		return Field{}, fmt.Errorf("idl: bad field %q", line)
 	}
-	id, err := strconv.Atoi(strings.TrimSpace(line[:colon]))
+	id, err := strconv.Atoi(strings.TrimSpace(core[:colon]))
 	if err != nil {
 		return Field{}, fmt.Errorf("idl: bad field id in %q", line)
 	}
-	rest := strings.Fields(strings.TrimSpace(line[colon+1:]))
+	rest := strings.Fields(strings.TrimSpace(core[colon+1:]))
+	if len(rest) == 3 && (rest[0] == "required" || rest[0] == "optional") {
+		rest = rest[1:]
+	}
 	if len(rest) != 2 {
 		return Field{}, fmt.Errorf("idl: bad field %q", line)
 	}
@@ -240,4 +309,45 @@ func parseField(line string) (Field, error) {
 		return Field{}, fmt.Errorf("idl: unsupported type %s", rest[0])
 	}
 	return Field{ID: id, Type: rest[0], Name: rest[1]}, nil
+}
+
+// splitAnnot peels a trailing `(k = v, ...)` annotation block.
+func splitAnnot(line string) (core, annot string) {
+	line = strings.TrimSpace(line)
+	if !strings.HasSuffix(line, ")") {
+		return line, ""
+	}
+	depth := 0
+	for i := len(line) - 1; i >= 0; i-- {
+		switch line[i] {
+		case ')':
+			depth++
+		case '(':
+			depth--
+			if depth != 0 {
+				continue
+			}
+			inner := line[i+1 : len(line)-1]
+			if strings.Contains(inner, "=") || strings.Contains(inner, "agw.") {
+				return strings.TrimSpace(line[:i]), inner
+			}
+			return line, ""
+		}
+	}
+	return line, ""
+}
+
+func parseKV(annot string) map[string]string {
+	out := map[string]string{}
+	if annot == "" {
+		return out
+	}
+	for _, p := range strings.Split(annot, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
+		if !ok {
+			continue
+		}
+		out[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	return out
 }

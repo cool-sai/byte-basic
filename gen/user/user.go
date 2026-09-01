@@ -10,19 +10,19 @@ import (
 )
 
 type GetUserReq struct {
-	ID int64
+	ID int64 `json:"id"`
 }
 
 type GetUserResp struct {
-	ID   int64
-	Name string
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 type PingReq struct {
 }
 
 type PingResp struct {
-	Msg string
+	Msg string `json:"msg"`
 }
 
 type UserService interface {

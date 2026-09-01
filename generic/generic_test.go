@@ -9,7 +9,7 @@ import (
 )
 
 func TestMapJSONBinaryRoundTrip(t *testing.T) {
-	spec, err := idl.ParseFile("../idl/user.idl")
+	spec, err := idl.ParseFile("../idl/user.thrift")
 	if err != nil {
 		t.Fatal(err)
 	}

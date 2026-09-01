@@ -1,6 +1,6 @@
 """Generic client in Python: no generated stubs.
 
-Field ids and types come from idl/user.idl — same contract the Go server uses.
+Field ids and types come from idl/user.thrift — same contract the Go server uses.
 """
 from __future__ import annotations
 

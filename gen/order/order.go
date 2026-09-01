@@ -10,24 +10,24 @@ import (
 )
 
 type CreateOrderReq struct {
-	UserId int64
-	Amount int64
+	UserId int64 `json:"userId"`
+	Amount int64 `json:"amount"`
 }
 
 type CreateOrderResp struct {
-	ID     int64
-	Status string
+	ID     int64  `json:"id"`
+	Status string `json:"status"`
 }
 
 type GetOrderReq struct {
-	ID int64
+	ID int64 `json:"id"`
 }
 
 type GetOrderResp struct {
-	ID       int64
-	UserId   int64
-	Status   string
-	UserName string
+	ID       int64  `json:"id"`
+	UserId   int64  `json:"userId"`
+	Status   string `json:"status"`
+	UserName string `json:"userName"`
 }
 
 type OrderService interface {
