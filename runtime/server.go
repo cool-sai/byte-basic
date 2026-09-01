@@ -2,15 +2,12 @@ package runtime
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"sync"
-	"time"
 )
-
-var errUnknownMethod = errors.New("unknown method")
 
 func init() {
 	inst := os.Getenv("INSTANCE")
@@ -29,10 +26,19 @@ type HandlerFunc func(ctx context.Context, body []byte) ([]byte, error)
 type Server struct {
 	mu       sync.RWMutex
 	handlers map[string]HandlerFunc
+	mws      []Middleware
 }
 
 func NewServer() *Server {
-	return &Server{handlers: map[string]HandlerFunc{}}
+	s := &Server{handlers: map[string]HandlerFunc{}}
+	s.Use(Trace, Metrics, Log)
+	return s
+}
+
+func (s *Server) Use(mw ...Middleware) {
+	s.mu.Lock()
+	s.mws = append(s.mws, mw...)
+	s.mu.Unlock()
 }
 
 func (s *Server) Handle(method string, h HandlerFunc) {
@@ -75,26 +81,20 @@ func (s *Server) serve(conn net.Conn) {
 		}
 		s.mu.RLock()
 		h := s.handlers[msg.method]
+		mws := s.mws
 		s.mu.RUnlock()
-		start := time.Now()
-		ctx, sp := startSpan(msg.method, msg.hdr)
 		if h == nil {
-			observeRPC(msg.method, "error", time.Since(start))
-			sp.finish(errUnknownMethod)
-			_ = writeMsg(conn, MsgException, msg.seq, msg.method, []byte("unknown method "+msg.method))
-			continue
+			method := msg.method
+			h = func(context.Context, []byte) ([]byte, error) {
+				return nil, fmt.Errorf("unknown method %s", method)
+			}
 		}
-		body, err := h(ctx, msg.body)
+		ctx := withRPC(context.Background(), rpcInfo{method: msg.method, seq: msg.seq, hdr: msg.hdr})
+		body, err := chain(mws, h)(ctx, msg.body)
 		if err != nil {
-			observeRPC(msg.method, "error", time.Since(start))
-			sp.finish(err)
-			slog.Error("rpc", "method", msg.method, "seq", msg.seq, "trace", sp.hexTrace(), "err", err)
 			_ = writeMsg(conn, MsgException, msg.seq, msg.method, []byte(err.Error()))
 			continue
 		}
-		observeRPC(msg.method, "ok", time.Since(start))
-		sp.finish(nil)
-		slog.Info("rpc", "method", msg.method, "seq", msg.seq, "trace", sp.hexTrace())
 		_ = writeMsg(conn, MsgReply, msg.seq, msg.method, body)
 	}
 }

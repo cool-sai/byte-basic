@@ -43,7 +43,7 @@ func envOr(key, def string) string {
 	return def
 }
 
-func startSpan(name string, hdr []byte) (context.Context, *span) {
+func startSpan(ctx context.Context, name string, hdr []byte) (context.Context, *span) {
 	sp := &span{
 		name:     name,
 		start:    time.Now(),
@@ -58,7 +58,7 @@ func startSpan(name string, hdr []byte) (context.Context, *span) {
 		copy(sp.sc.traceID[:], randN(16))
 	}
 	copy(sp.sc.spanID[:], randN(8))
-	ctx := context.WithValue(context.Background(), ctxKey{}, sp.sc)
+	ctx = context.WithValue(ctx, ctxKey{}, sp.sc)
 	return ctx, sp
 }
 

@@ -1,6 +1,6 @@
 # 本地模拟基建（以后按步做）
 
-当前做到第 6 步：一次 GetOrder 在 Jaeger 里能看到 order → user 两条 span。
+当前做到第 7 步：环境变量是启动时的底，etcd 里改 `user/name_suffix` 不用重启，下次 RPC 就生效。
 
 Docker Compose 是 Docker 的「一次起一堆容器」工具：`docker-compose.yml` 里写镜像、端口、环境变量，`docker compose up` 一起起来。容器之间用服务名当地址（`user-1:8888`），不用写 `127.0.0.1`。它还不是 K8s，也不是服务发现。
 
@@ -103,7 +103,7 @@ open http://127.0.0.1:3000/d/rpc/rpc
 
 进程不主动推指标；Prometheus 来拉。Prometheus 挂了不影响 RPC。
 
-## 第 6 步怎么跑（当前）
+## 第 6 步怎么跑
 
 ```bash
 ./scripts/compose-up.sh -d
@@ -116,3 +116,15 @@ Jaeger → Service `order` → Find Traces。一条 GetOrder 下面挂一条 Get
 RPC 帧在 method 和 body 之间加了 2 字节 header 长度：有上游就把 `traceID(16) + parentSpanID(8)` 塞进去。order 处理完调 user 时，把当前 span 当 parent 写进帧。Jaeger 挂了只是不上报，RPC 照跑。
 
 日志 JSON 里也有 `trace` 字段，Loki 可以 `{psm="order"} |= "同一串 hex"`。
+
+## 第 7 步怎么跑（当前）
+
+```bash
+./scripts/compose-up.sh -d
+go run ./example/order_client          # userName=alice
+open http://127.0.0.1:2381             # 改 user/name_suffix
+# 或 ./scripts/config-put.sh user/name_suffix '!!!'
+go run ./example/order_client          # userName=alice!!!
+```
+
+没配 `CONFIG` 时只用环境变量 `NAME_SUFFIX`（启动时读一次）。配了就 watch etcd 的 `user/name_suffix`，两个 user 实例一起变，不用滚动重启。etcd 挂了继续用内存里上一次的值。

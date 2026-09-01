@@ -4,25 +4,28 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"log/slog"
 	"os"
 	"time"
 
+	"minikitex/config"
 	"minikitex/discovery"
 	"minikitex/gen/user"
+	"minikitex/runtime"
 )
 
 type Handler struct {
 	instance string
+	suffix   *config.Var
 }
 
-func (h Handler) GetUser(_ context.Context, req *user.GetUserReq) (*user.GetUserResp, error) {
+func (h Handler) GetUser(ctx context.Context, req *user.GetUserReq) (*user.GetUserResp, error) {
 	names := map[int64]string{1: "alice", 2: "bob"}
 	name, ok := names[req.ID]
 	if !ok {
 		return nil, fmt.Errorf("user %d not found", req.ID)
 	}
-	slog.Info("GetUser", "id", req.ID, "name", name)
+	name += h.suffix.Get()
+	runtime.Logger(ctx).Info("GetUser", "id", req.ID, "name", name)
 	return &user.GetUserResp{ID: req.ID, Name: name}, nil
 }
 
@@ -39,8 +42,12 @@ func main() {
 	if os.Getenv("REGISTRY") != "" {
 		go announce(instance)
 	}
+	suffix := config.NewVar(os.Getenv("NAME_SUFFIX"))
+	if os.Getenv("CONFIG") != "" {
+		go suffix.Watch(os.Getenv("CONFIG"), "user/name_suffix")
+	}
 	log.Println("user server", instance, "listening", addr)
-	log.Fatal(user.NewServer(Handler{instance: instance}).ListenAndServe(addr))
+	log.Fatal(user.NewServer(Handler{instance: instance, suffix: suffix}).ListenAndServe(addr))
 }
 
 func announce(instance string) {
