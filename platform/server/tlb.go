@@ -444,3 +444,63 @@ http {
 	b.WriteString("}\n")
 	return b.String()
 }
+
+var tlbSkipSvc = map[string]bool{
+	"tlb": true, "mysql": true, "consul": true, "etcd": true,
+	"jaeger": true, "loki": true, "promtail": true, "prometheus": true,
+	"grafana": true, "adminer": true, "gateway": true,
+}
+
+func tlbListenPort(name string) string {
+	switch name {
+	case "platform":
+		return "8081"
+	case "order":
+		return "8080"
+	case "etcdui":
+		return "2381"
+	default:
+		return "80"
+	}
+}
+
+func (s *server) listTlbUpstreams(w http.ResponseWriter, _ *http.Request) {
+	names := map[string]bool{}
+	add := func(n string) {
+		n = strings.TrimSpace(n)
+		if n == "" || tlbSkipSvc[n] || strings.HasPrefix(n, "user-") {
+			return
+		}
+		names[n] = true
+	}
+	add("platform")
+	add("order")
+	if out, err := s.compose("config", "--services"); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			add(line)
+		}
+	}
+	if rows, err := s.db.Query(`SELECT compose FROM deploy_app`); err == nil {
+		for rows.Next() {
+			var compose string
+			if err := rows.Scan(&compose); err != nil {
+				continue
+			}
+			for _, c := range parseCompose(compose) {
+				add(c)
+			}
+		}
+		rows.Close()
+	}
+	list := make([]string, 0, len(names))
+	for n := range names {
+		list = append(list, n)
+	}
+	sort.Strings(list)
+	up := make([]map[string]any, 0, len(list))
+	for _, n := range list {
+		port := tlbListenPort(n)
+		up = append(up, map[string]any{"name": n, "target": n + ":" + port})
+	}
+	writeJSON(w, map[string]any{"upstreams": up})
+}

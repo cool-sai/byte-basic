@@ -4,3 +4,5 @@
 /deploy/runtime.yml
 platform/web/node_modules
 platform/web/dist
+projects/agent-web/node_modules
+projects/agent-web/dist

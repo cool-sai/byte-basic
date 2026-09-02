@@ -978,7 +978,7 @@ func (s *server) createDeploy(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		fmt.Fprintf(lg, "(context %s)\n", filepath.Dir(src))
-		cmd := exec.Command("docker", "build", "--progress=plain", "-t", imageVer, "-t", imageLocal, "-f", "-", filepath.Dir(src))
+		cmd := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, "-f", "-", filepath.Dir(src))
 		cmd.Stdin = strings.NewReader(fmt.Sprintf("FROM scratch\nCOPY %s /app\nENTRYPOINT [\"/app\"]\n", filepath.Base(src)))
 		cmd.Stdout = lg
 		cmd.Stderr = lg
@@ -995,7 +995,7 @@ func (s *server) createDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upArgs := append([]string{"--progress=plain", "up", "--no-deps", "--force-recreate", "-d"}, app.Compose...)
+	upArgs := append([]string{"up", "--no-deps", "--force-recreate", "-d"}, app.Compose...)
 	fmt.Fprintf(lg, "$ docker compose up --no-deps --force-recreate -d %s\n", strings.Join(app.Compose, " "))
 	if err := s.composeTo(lg, upArgs...); err != nil {
 		fmt.Fprintf(lg, "%s\n", err)
@@ -1101,7 +1101,7 @@ func (s *server) buildNodeImage(lg io.Writer, src, imageVer, imageLocal string) 
 	if err := os.WriteFile(filepath.Join(tmp, "Dockerfile"), []byte(nodeWebDockerfile), 0o644); err != nil {
 		return err
 	}
-	build := exec.Command("docker", "build", "--progress=plain", "-t", imageVer, "-t", imageLocal, tmp)
+	build := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, tmp)
 	build.Stdout = lg
 	build.Stderr = lg
 	return build.Run()
@@ -1128,7 +1128,7 @@ func (s *server) syncRuntimeCompose() error {
 		return err
 	}
 	defer rows.Close()
-	type extra struct{ svc, image string }
+	type extra struct{ svc, image, label string }
 	var extras []extra
 	seen := map[string]bool{}
 	for rows.Next() {
@@ -1136,7 +1136,10 @@ func (s *server) syncRuntimeCompose() error {
 		if err := rows.Scan(&name, &compose, &label); err != nil {
 			return err
 		}
-		if label != "node" {
+		if label == "" {
+			label = "golang"
+		}
+		if label != "node" && label != "golang" {
 			continue
 		}
 		image := "minikitex-" + name + ":local"
@@ -1145,7 +1148,7 @@ func (s *server) syncRuntimeCompose() error {
 				continue
 			}
 			seen[c] = true
-			extras = append(extras, extra{svc: c, image: image})
+			extras = append(extras, extra{svc: c, image: image, label: label})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -1163,6 +1166,9 @@ func (s *server) syncRuntimeCompose() error {
 	y.WriteString("services:\n")
 	for _, e := range extras {
 		fmt.Fprintf(&y, "  %s:\n    image: %s\n    hostname: %s\n    pull_policy: never\n    expose:\n      - \"80\"\n    labels:\n      psm: %s\n", e.svc, e.image, e.svc, e.svc)
+		if e.label == "golang" {
+			y.WriteString("    environment:\n      LISTEN: \"0.0.0.0:80\"\n")
+		}
 	}
 	return os.WriteFile(path, []byte(y.String()), 0o644)
 }

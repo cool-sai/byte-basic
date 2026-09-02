@@ -302,6 +302,7 @@ export const api = {
   runtime: () => req<Container[] | null>("/api/runtime"),
   tables: () => req<DbTable[] | null>("/api/db/tables"),
   table: (name: string) => req<TableDetail>(`/api/db/tables/${name}`),
+  tlbUpstreams: () => req<{ upstreams: { name: string; target: string }[] | null }>("/api/tlb/upstreams"),
   tlbSites: () => req<{ sites: TlbSite[] | null; zone: string }>("/api/tlb/sites"),
   tlbSite: (name: string) => req<TlbSiteDetail>("/api/tlb/sites/" + name),
   createTlbSite: (name: string) =>

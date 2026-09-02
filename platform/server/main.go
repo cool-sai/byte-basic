@@ -76,6 +76,7 @@ func main() {
 	mux.HandleFunc("GET /api/runtime", s.runtime)
 	mux.HandleFunc("GET /api/db/tables", s.listTables)
 	mux.HandleFunc("GET /api/db/tables/{name}", s.getTable)
+	mux.HandleFunc("GET /api/tlb/upstreams", s.listTlbUpstreams)
 	mux.HandleFunc("GET /api/tlb/sites", s.listTlbSites)
 	mux.HandleFunc("POST /api/tlb/sites", s.createTlbSite)
 	mux.HandleFunc("GET /api/tlb/sites/{name}", s.showTlbSite)

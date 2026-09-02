@@ -54,7 +54,7 @@ export default function JobForm({
       <div className="flex w-full flex-col gap-4">
         <Input addBefore="名称" value={name} onChange={setName} placeholder="user" disabled={edit} />
         <Input addBefore="Git" value={gitUrl} onChange={setGitUrl} placeholder="https://github.com/coolCicada/byte-basic.git" />
-        <Input addBefore="脚本" value={script} onChange={setScript} placeholder="scripts/scm/user.sh" />
+        <Input addBefore="脚本" value={script} onChange={setScript} placeholder="projects/agent-web/build.sh" />
         <Select className="w-full" value={label} onChange={setLabel} placeholder="label">
           {LABELS.map((x) => (
             <Select.Option key={x} value={x}>
@@ -66,7 +66,7 @@ export default function JobForm({
           ))}
         </Select>
         <Typography.Text type="secondary">
-          golang = 服务二进制；node = 平台前端。示例脚本：scripts/scm/user.sh、order.sh、gateway.sh、etcdui.sh、platform-api.sh、platform-web.sh
+          golang = 二进制；node = 静态站。示例：projects/agent-web/build.sh、projects/agent-server/build.sh、scripts/scm/user.sh
         </Typography.Text>
       </div>
     </Modal>
