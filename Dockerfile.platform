@@ -1,15 +1,18 @@
 # 控制台：前端静态页 + API。运行时还要 git/go（SCM 拉代码编译）和 docker CLI（部署）。
 FROM alpine:3.20 AS web
-RUN apk add --no-cache nodejs npm
+RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
+ && apk add --no-cache nodejs npm
 WORKDIR /web
 COPY platform/web/package.json platform/web/package-lock.json ./
-RUN npm ci
+RUN npm ci --registry=https://registry.npmmirror.com --fetch-retries=8 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 COPY platform/web/ ./
 RUN npm run build
 
 FROM alpine:3.20 AS api
-RUN apk add --no-cache go git ca-certificates
+RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
+ && apk add --no-cache go git ca-certificates
 WORKDIR /src
+ENV GOPROXY=https://goproxy.cn,direct
 COPY go.mod go.sum ./
 RUN go mod download
 COPY idl ./idl
@@ -17,7 +20,8 @@ COPY platform/server ./platform/server
 RUN CGO_ENABLED=0 go build -o /usr/local/bin/platform ./platform/server
 
 FROM alpine:3.20
-RUN apk add --no-cache git go nodejs npm docker-cli docker-cli-compose ca-certificates tzdata
+RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
+ && apk add --no-cache git go nodejs npm docker-cli docker-cli-compose ca-certificates tzdata
 COPY --from=api /usr/local/bin/platform /usr/local/bin/platform
 COPY --from=web /web/dist /web
 WORKDIR /work

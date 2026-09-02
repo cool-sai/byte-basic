@@ -403,6 +403,20 @@ http {
     sendfile on;
     resolver 127.0.0.11 valid=10s ipv6=off;
 `)
+	if tlbTLSOn() {
+		b.WriteString(`
+    server {
+        listen 80 default_server;
+        server_name _;
+        location /.well-known/acme-challenge/ {
+            root /acme;
+        }
+        location / {
+            return 301 https://$host$request_uri;
+        }
+    }
+`)
+	}
 	for i, st := range sites {
 		if len(st.routes) == 0 {
 			continue
@@ -411,12 +425,30 @@ http {
 		if i == 0 {
 			listen = "listen 80 default_server;"
 		}
+		if tlbTLSOn() {
+			listen = "listen 443 ssl;"
+			if i == 0 {
+				listen = "listen 443 ssl default_server;"
+			}
+		}
 		fmt.Fprintf(&b, `
     server {
         %s
         server_name %s;
         client_max_body_size 32m;
 `, listen, st.Host)
+		if tlbTLSOn() {
+			dir := tlbTLSDir()
+			fmt.Fprintf(&b, `        ssl_certificate %s/fullchain.pem;
+        ssl_certificate_key %s/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+`, dir, dir)
+		} else {
+			b.WriteString(`        location /.well-known/acme-challenge/ {
+            root /acme;
+        }
+`)
+		}
 		routes := append([]tlbRoute(nil), st.routes...)
 		sort.Slice(routes, func(a, b int) bool {
 			return len(routes[a].Path) > len(routes[b].Path)
@@ -439,6 +471,23 @@ http {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+func tlbTLSDir() string {
+	name := strings.TrimSpace(os.Getenv("TLB_TLS_NAME"))
+	if name == "" {
+		return ""
+	}
+	return "/etc/letsencrypt/live/" + name
+}
+
+func tlbTLSOn() bool {
+	dir := tlbTLSDir()
+	if dir == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, "fullchain.pem"))
+	return err == nil
 }
 
 var tlbSkipSvc = map[string]bool{
