@@ -10,6 +10,7 @@ export type ScmJob = {
   name: string;
   gitUrl: string;
   scriptPath: string;
+  branch?: string;
   createdAt: string;
 };
 
@@ -31,8 +32,20 @@ export type Build = {
   version: string;
   binPath: string;
   status: string;
+  branch?: string;
+  commit?: string;
   log?: string;
   createdAt: string;
+};
+
+export type GitBranch = {
+  name: string;
+  commit: string;
+};
+
+export type BranchList = {
+  default?: string;
+  branches: GitBranch[] | null;
 };
 
 export type Field = {
@@ -67,6 +80,18 @@ export type Publish = {
   status: string;
   log?: string;
   createdAt: string;
+};
+
+export type DeployApp = {
+  id: number;
+  name: string;
+  scmName: string;
+  compose: string[] | null;
+  createdAt?: string;
+};
+
+export type DeployApps = {
+  apps: DeployApp[] | null;
 };
 
 export type DeployRecord = {
@@ -131,12 +156,7 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-async function streamBuild(name: string, onLog: (text: string) => void): Promise<BuildResult> {
-  const res = await fetch("/api/scm/builds", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
+async function readSSE(res: Response, onLog: (text: string) => void): Promise<BuildResult> {
   const ct = res.headers.get("content-type") || "";
   if (!ct.includes("text/event-stream")) {
     const text = await res.text();
@@ -188,9 +208,18 @@ async function streamBuild(name: string, onLog: (text: string) => void): Promise
     throw new Error("stream ended");
   }
   if (done.status !== "ok") {
-    throw new Error(done.error || "build fail");
+    throw new Error(done.error || "fail");
   }
   return done;
+}
+
+async function streamSSE(path: string, body: unknown, onLog: (text: string) => void): Promise<BuildResult> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readSSE(res, onLog);
 }
 
 export { errMsg };
@@ -204,11 +233,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, gitUrl, scriptPath }),
     }),
+  deleteScmJob: (name: string) =>
+    req<{ name: string }>(`/api/scm/jobs/${name}`, { method: "DELETE" }),
+  branches: (name: string) => req<BranchList>(`/api/scm/jobs/${name}/branches`),
   builds: (service?: string) =>
     req<Build[] | null>("/api/scm/builds" + (service ? `?service=${service}` : "")),
   buildDetail: (id: number) => req<Build>(`/api/scm/builds/${id}`),
-  build: (name: string, onLog: (text: string) => void) =>
-    streamBuild(name, onLog),
+  createBuild: (name: string, branch: string) =>
+    req<Build>("/api/scm/builds", {
+      method: "POST",
+      body: JSON.stringify({ name, branch }),
+    }),
+  watchBuild: (id: number, onLog: (text: string) => void) =>
+    fetch("/api/scm/builds/" + id + "/stream").then((res) => readSSE(res, onLog)),
   idls: () => req<IdlView[]>("/api/bam/idls"),
   idl: (name: string) => req<IdlView>(`/api/bam/idls/${name}`),
   saveIdl: (name: string, content: string) =>
@@ -219,13 +256,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name }),
     }),
+  deployApps: () => req<DeployApps>("/api/deploy/apps"),
+  deployApp: (name: string) => req<DeployApp>(`/api/deploy/apps/${name}`),
+  createDeployApp: (name: string, scmName: string, compose: string) =>
+    req<DeployApp>("/api/deploy/apps", {
+      method: "POST",
+      body: JSON.stringify({ name, scmName, compose }),
+    }),
   deploys: (service?: string) =>
     req<DeployRecord[] | null>("/api/deploys" + (service ? `?service=${service}` : "")),
-  deploy: (service: string, version: string) =>
-    req<{ service: string; version: string; status: string }>("/api/deploys", {
-      method: "POST",
-      body: JSON.stringify({ service, version }),
-    }),
+  deployDetail: (id: number) => req<DeployRecord>(`/api/deploys/${id}`),
+  deploy: (service: string, version: string, onLog: (text: string) => void) =>
+    streamSSE("/api/deploys", { service, version }, onLog),
   runtime: () => req<Container[] | null>("/api/runtime"),
   tables: () => req<DbTable[] | null>("/api/db/tables"),
   table: (name: string) => req<TableDetail>(`/api/db/tables/${name}`),

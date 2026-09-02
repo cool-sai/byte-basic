@@ -7,6 +7,9 @@ import BuildPage from "./pages/scm/BuildPage";
 import BAM from "./pages/BAM";
 import AGW from "./pages/AGW";
 import Deploy from "./pages/Deploy";
+import AppList from "./pages/deploy/AppList";
+import AppPage from "./pages/deploy/AppPage";
+import RunPage from "./pages/deploy/RunPage";
 import DB from "./pages/DB";
 
 const TABS = [
@@ -46,7 +49,11 @@ export default function App() {
           </Route>
           <Route path="/bam" element={<BAM />} />
           <Route path="/agw" element={<AGW />} />
-          <Route path="/deploy" element={<Deploy />} />
+          <Route path="/deploy" element={<Deploy />}>
+            <Route index element={<AppList />} />
+            <Route path=":name" element={<AppPage />} />
+            <Route path=":name/runs/:id" element={<RunPage />} />
+          </Route>
           <Route path="/db" element={<DB />} />
         </Routes>
       </Layout.Content>

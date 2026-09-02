@@ -54,16 +54,23 @@ func main() {
 	mux.HandleFunc("GET /api/services", s.getServices)
 	mux.HandleFunc("GET /api/scm/jobs", s.listJobs)
 	mux.HandleFunc("GET /api/scm/jobs/{name}", s.showJob)
+	mux.HandleFunc("GET /api/scm/jobs/{name}/branches", s.listBranches)
 	mux.HandleFunc("POST /api/scm/jobs", s.createJob)
+	mux.HandleFunc("DELETE /api/scm/jobs/{name}", s.deleteJob)
 	mux.HandleFunc("GET /api/scm/builds", s.listBuilds)
 	mux.HandleFunc("GET /api/scm/builds/{id}", s.getBuild)
+	mux.HandleFunc("GET /api/scm/builds/{id}/stream", s.streamBuild)
 	mux.HandleFunc("POST /api/scm/builds", s.createBuild)
 	mux.HandleFunc("GET /api/bam/idls", s.listIDLs)
 	mux.HandleFunc("GET /api/bam/idls/{name}", s.getIDL)
 	mux.HandleFunc("PUT /api/bam/idls/{name}", s.saveIDL)
 	mux.HandleFunc("GET /api/agw/publishes", s.listPublishes)
 	mux.HandleFunc("POST /api/agw/publish", s.publishAGW)
+	mux.HandleFunc("GET /api/deploy/apps", s.listApps)
+	mux.HandleFunc("GET /api/deploy/apps/{name}", s.showApp)
+	mux.HandleFunc("POST /api/deploy/apps", s.createApp)
 	mux.HandleFunc("GET /api/deploys", s.listDeploys)
+	mux.HandleFunc("GET /api/deploys/{id}", s.getDeploy)
 	mux.HandleFunc("POST /api/deploys", s.createDeploy)
 	mux.HandleFunc("GET /api/runtime", s.runtime)
 	mux.HandleFunc("GET /api/db/tables", s.listTables)
@@ -137,6 +144,13 @@ func migrate(db *sql.DB) error {
 			log_text MEDIUMTEXT,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS deploy_app (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			name VARCHAR(64) NOT NULL UNIQUE,
+			scm_name VARCHAR(64) NOT NULL,
+			compose VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
 		`CREATE TABLE IF NOT EXISTS deploy_record (
 			id BIGINT PRIMARY KEY AUTO_INCREMENT,
 			service VARCHAR(64) NOT NULL,
@@ -151,7 +165,20 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	for _, q := range []string{
+		`ALTER TABLE scm_job ADD COLUMN branch VARCHAR(255) NOT NULL DEFAULT ''`,
+		`ALTER TABLE scm_build ADD COLUMN branch VARCHAR(255) NOT NULL DEFAULT ''`,
+		`ALTER TABLE scm_build ADD COLUMN git_commit VARCHAR(64) NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.Exec(q); err != nil && !dupColumn(err) {
+			return err
+		}
+	}
 	return nil
+}
+
+func dupColumn(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "duplicate column")
 }
 
 func (s *server) getServices(w http.ResponseWriter, _ *http.Request) {
@@ -286,7 +313,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(204)
 			return

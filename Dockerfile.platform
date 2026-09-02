@@ -17,7 +17,7 @@ COPY platform/server ./platform/server
 RUN CGO_ENABLED=0 go build -o /usr/local/bin/platform ./platform/server
 
 FROM alpine:3.20
-RUN apk add --no-cache git go docker-cli docker-cli-compose ca-certificates
+RUN apk add --no-cache git go nodejs npm docker-cli docker-cli-compose ca-certificates
 COPY --from=api /usr/local/bin/platform /usr/local/bin/platform
 COPY --from=web /web/dist /web
 WORKDIR /work

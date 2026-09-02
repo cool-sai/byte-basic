@@ -143,7 +143,7 @@ services:
     labels:
       psm: gateway
     volumes:
-      - ./idl:/idl:ro
+      - ${HOST_ROOT:-.}/idl:/idl:ro
     ports:
       - "18080:8080"
     depends_on:
@@ -167,7 +167,7 @@ services:
     command: -config.file=/etc/promtail/config.yml
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./observability/promtail.yml:/etc/promtail/config.yml:ro
+      - ${HOST_ROOT:-.}/observability/promtail.yml:/etc/promtail/config.yml:ro
     depends_on:
       - loki
 
@@ -179,7 +179,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${HOST_ROOT:-.}/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
       - user-1
       - user-2
@@ -196,10 +196,11 @@ services:
       LISTEN: "0.0.0.0:8081"
       MYSQL: "root:minikitex@tcp(mysql:3306)/minikitex?parseTime=true&charset=utf8mb4"
       WEB_DIR: /web
+      HOST_ROOT: ${PWD}
     ports:
       - "5173:8081"
     volumes:
-      - .:/work
+      - ${HOST_ROOT:-.}:/work
       - scm-work:/work/scm-work
       - artifacts:/work/artifacts
       - /var/run/docker.sock:/var/run/docker.sock
@@ -244,9 +245,9 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
-      - ./observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
-      - ./observability/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
-      - ./observability/dashboards:/var/lib/grafana/dashboards:ro
+      - ${HOST_ROOT:-.}/observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
+      - ${HOST_ROOT:-.}/observability/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ${HOST_ROOT:-.}/observability/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - loki
       - prometheus
