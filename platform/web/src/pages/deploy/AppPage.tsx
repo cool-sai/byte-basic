@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, Message, Select, Table, Tag, Typography } from "@arco-design/web-react";
+import { Button, Card, Message, Modal, Radio, Select, Table, Tag, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, errMsg, type Build, type Container, type DeployRecord } from "../../api";
@@ -11,7 +11,10 @@ export default function AppPage() {
   const { name = "" } = useParams();
   const loc = useLocation();
   const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"artifact" | "build">("artifact");
   const [version, setVersion] = useState("");
+  const [branch, setBranch] = useState("");
   const [liveLog, setLiveLog] = useState("");
 
   const { data, loading, error, refresh } = useRequest(
@@ -35,22 +38,45 @@ export default function AppPage() {
   const deploys = data?.deploys || [];
   const compose = app?.compose || [];
   const runtime = (data?.runtime || []).filter((c) => compose.includes(c.Service || ""));
-  const picked = okBuilds.find((b) => b.version === version);
+  const scmName = app?.scmName || "";
+
+  const { data: br, loading: brLoading, error: brErr } = useRequest(() => api.branches(scmName), {
+    ready: open && !!scmName,
+    refreshDeps: [scmName, open],
+    onSuccess: (d) => {
+      const first = d.default || d.branches?.[0]?.name || "";
+      setBranch((cur) => ((d.branches || []).some((x) => x.name === cur) ? cur : first));
+    },
+  });
+  const branches = br?.branches || [];
 
   const { run: deploy, loading: busy } = useRequest(
-    async (ver: string) => {
+    async (ver: string, doBuild: boolean, brName: string) => {
       setLiveLog("");
-      await api.deploy(name, ver, (text) => setLiveLog((cur) => cur + text));
+      let version = ver;
+      if (doBuild) {
+        if (!scmName) {
+          throw new Error("未关联 SCM");
+        }
+        const row = await api.createBuild(scmName, brName);
+        version = row.version;
+        await api.watchBuild(row.id, (text) => setLiveLog((cur) => cur + text));
+      }
+      await api.deploy(name, version, (text) => setLiveLog((cur) => cur + text));
+      return version;
     },
     {
       manual: true,
-      onSuccess: (_d, [ver]) => {
+      onSuccess: (ver) => {
         Message.success("已部署 " + name + " @ " + ver);
+        setOpen(false);
         void refresh();
       },
       onError: (e) => Message.error(errMsg(e)),
     },
   );
+
+  const canOk = mode === "build" ? Boolean(branch) : Boolean(version);
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -73,36 +99,23 @@ export default function AppPage() {
             <div className="text-xs text-slate-500">Flask :80。发完后 TLB 把路径转到 {(compose[0] || name) + ":80"}。</div>
           ) : null}
         </div>
+        <Button
+          type="primary"
+          disabled={!app}
+          onClick={() => {
+            setLiveLog("");
+            setMode(okBuilds.length ? "artifact" : "build");
+            setOpen(true);
+          }}
+        >
+          部署
+        </Button>
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
 
-      <div className="flex items-center gap-2">
-        <Select
-          value={version}
-          onChange={setVersion}
-          style={{ width: 280 }}
-          loading={loading}
-          placeholder={okBuilds.length ? "选择 SCM 产物" : "先去 SCM 编译"}
-        >
-          {okBuilds.map((b: Build) => (
-            <Select.Option key={b.version} value={b.version}>
-              {b.version}
-            </Select.Option>
-          ))}
-        </Select>
-        <Button type="primary" loading={busy} disabled={!version || busy} onClick={() => deploy(version)}>
-          打镜像并启动
-        </Button>
-      </div>
-      {picked ? (
-        <Typography.Text type="secondary" className="font-mono text-xs">
-          {picked.binPath}
-        </Typography.Text>
-      ) : null}
-
       {busy || liveLog ? (
         <Card title="本次部署">
-          <LogBox text={liveLog} live />
+          <LogBox text={liveLog} live={busy} />
         </Card>
       ) : null}
 
@@ -139,6 +152,65 @@ export default function AppPage() {
           { title: "时间", dataIndex: "createdAt" },
         ]}
       />
+
+      <Modal
+        title={"部署 " + (app?.name || name)}
+        visible={open}
+        onCancel={() => {
+          if (!busy) {
+            setOpen(false);
+          }
+        }}
+        onOk={() => void deploy(version, mode === "build", branch)}
+        confirmLoading={busy}
+        okButtonProps={{ disabled: !canOk || busy }}
+        okText={mode === "build" ? "编译并部署" : "打镜像并启动"}
+        style={{ width: 640 }}
+      >
+        <div className="flex w-full flex-col gap-4">
+          <Radio.Group value={mode} onChange={setMode} disabled={busy}>
+            <Radio value="artifact">已有产物</Radio>
+            <Radio value="build">选分支编译后部署</Radio>
+          </Radio.Group>
+          {mode === "build" ? (
+            <div className="flex w-full flex-col gap-2">
+              {brErr ? <Typography.Text type="error">{errMsg(brErr)}</Typography.Text> : null}
+              <Select
+                className="w-full"
+                loading={brLoading}
+                disabled={busy}
+                value={branch || undefined}
+                onChange={setBranch}
+                placeholder="选择要编译的分支"
+                showSearch
+              >
+                {branches.map((b) => (
+                  <Select.Option key={b.name} value={b.name}>
+                    {b.name}
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
+          ) : (
+            <Select
+              className="w-full"
+              loading={loading}
+              disabled={busy}
+              value={version || undefined}
+              onChange={setVersion}
+              placeholder={okBuilds.length ? "选择 SCM 产物" : "还没有编译产物，改选分支编译"}
+            >
+              {okBuilds.map((b: Build) => (
+                <Select.Option key={b.version} value={b.version}>
+                  {b.version}
+                  {b.branch ? " · " + b.branch : ""}
+                </Select.Option>
+              ))}
+            </Select>
+          )}
+          {busy || liveLog ? <LogBox text={liveLog} live={busy} /> : null}
+        </div>
+      </Modal>
     </div>
   );
 }
