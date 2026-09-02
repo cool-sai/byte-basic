@@ -59,7 +59,7 @@ export default function AppList() {
             部署项目
           </Typography.Title>
           <Typography.Text type="secondary">
-            注册服务名并关联 SCM。golang 产物当二进制启动；node 产物打成 nginx 静态站点。不在 compose 里的前端服务，部署时会注册进去。
+            注册服务名并关联 SCM。golang 产物当二进制启动；node 产物打成 nginx 静态站点；python 产物跑 Flask。不在 compose 里的服务，部署时会注册进去。
           </Typography.Text>
         </div>
         <Button type="primary" onClick={() => setCreating(true)}>

@@ -328,7 +328,7 @@ func (s *server) publishTlb(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	conf := renderTlbNginx(sites)
-	path := filepath.Join(s.root, "tlb", "nginx.conf")
+	path := "/tlb-conf/nginx.conf"
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		fail(w, 500, err)
 		return
@@ -337,14 +337,10 @@ func (s *server) publishTlb(w http.ResponseWriter, _ *http.Request) {
 		fail(w, 500, err)
 		return
 	}
-	out, err := s.compose("exec", "-T", "tlb", "nginx", "-t")
+	out, err := s.compose("exec", "-T", "tlb", "sh", "-c",
+		"nginx -t -c /generated/nginx.conf && cp /generated/nginx.conf /etc/nginx/nginx.conf && nginx -s reload")
 	if err != nil {
-		fail(w, 500, fmt.Errorf("nginx -t: %w\n%s", err, out))
-		return
-	}
-	out2, err := s.compose("exec", "-T", "tlb", "nginx", "-s", "reload")
-	if err != nil {
-		fail(w, 500, fmt.Errorf("nginx reload: %w\n%s", err, out+out2))
+		fail(w, 500, fmt.Errorf("nginx: %w\n%s", err, out))
 		return
 	}
 	writeJSON(w, map[string]any{"status": "ok", "sites": len(sites), "routes": n})

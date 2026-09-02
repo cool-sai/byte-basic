@@ -53,7 +53,7 @@ export default function JobList() {
             SCM 编译任务
           </Typography.Title>
           <Typography.Text type="secondary">
-            点进任务编译；编译时选分支，进当次记录看实时日志。label 用来区分 golang / node。
+            点进任务编译；编译时选分支，进当次记录看实时日志。label 用来区分 golang / node / python。
           </Typography.Text>
         </div>
         <Button

@@ -512,7 +512,7 @@ func (s *server) loadBuild(id string) (map[string]any, error) {
 	return map[string]any{
 		"id": bid, "service": service, "version": version, "binPath": binPath,
 		"status": status, "log": logText, "branch": branch, "commit": commit,
-		"createdAt": created.Format(time.RFC3339),
+		"createdAt": fmtTime(created),
 	}, nil
 }
 
@@ -773,7 +773,7 @@ func (s *server) listApps(w http.ResponseWriter, _ *http.Request) {
 			continue
 		}
 		a.Compose = parseCompose(compose)
-		created = t.Format(time.RFC3339)
+		created = fmtTime(t)
 		apps = append(apps, jsonApp(a, created))
 	}
 	writeJSON(w, map[string]any{"apps": apps})
@@ -885,7 +885,7 @@ func (s *server) getDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"id": id, "service": service, "version": version,
-		"status": status, "log": logText, "createdAt": created.Format(time.RFC3339),
+		"status": status, "log": logText, "createdAt": fmtTime(created),
 	})
 }
 
@@ -977,15 +977,23 @@ func (s *server) createDeploy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		fmt.Fprintf(lg, "(context %s)\n", filepath.Dir(src))
-		cmd := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, "-f", "-", filepath.Dir(src))
-		cmd.Stdin = strings.NewReader(fmt.Sprintf("FROM scratch\nCOPY %s /app\nENTRYPOINT [\"/app\"]\n", filepath.Base(src)))
-		cmd.Stdout = lg
-		cmd.Stderr = lg
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(lg, "%s\n", err)
-			finish("fail", err)
-			return
+		if label == "python" {
+			if err := s.buildPythonImage(lg, src, imageVer, imageLocal); err != nil {
+				fmt.Fprintf(lg, "%s\n", err)
+				finish("fail", err)
+				return
+			}
+		} else {
+			fmt.Fprintf(lg, "(context %s)\n", filepath.Dir(src))
+			cmd := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, "-f", "-", filepath.Dir(src))
+			cmd.Stdin = strings.NewReader(fmt.Sprintf("FROM scratch\nCOPY %s /app\nENTRYPOINT [\"/app\"]\n", filepath.Base(src)))
+			cmd.Stdout = lg
+			cmd.Stderr = lg
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(lg, "%s\n", err)
+				finish("fail", err)
+				return
+			}
 		}
 	}
 
@@ -1107,6 +1115,41 @@ func (s *server) buildNodeImage(lg io.Writer, src, imageVer, imageLocal string) 
 	return build.Run()
 }
 
+const pythonWebDockerfile = `FROM alpine:3.20
+RUN apk add --no-cache python3 py3-pip
+WORKDIR /app
+COPY app /app
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+EXPOSE 80
+CMD ["sh", "-c", "gunicorn -b ${LISTEN:-0.0.0.0:80} app:app"]
+`
+
+func (s *server) buildPythonImage(lg io.Writer, src, imageVer, imageLocal string) error {
+	tmp, err := os.MkdirTemp("", "mk-py-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	appDir := filepath.Join(tmp, "app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		return err
+	}
+	fmt.Fprintf(lg, "unpack %s\n", src)
+	untar := exec.Command("tar", "-xf", src, "-C", appDir)
+	untar.Stdout = lg
+	untar.Stderr = lg
+	if err := untar.Run(); err != nil {
+		return fmt.Errorf("unpack python artifact: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "Dockerfile"), []byte(pythonWebDockerfile), 0o644); err != nil {
+		return err
+	}
+	build := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, tmp)
+	build.Stdout = lg
+	build.Stderr = lg
+	return build.Run()
+}
+
 func (s *server) syncRuntimeCompose() error {
 	cmd := exec.Command("docker", "compose", "-f", "docker-compose.yml", "config", "--services")
 	cmd.Dir = s.root
@@ -1140,7 +1183,9 @@ func (s *server) syncRuntimeCompose() error {
 			label = "golang"
 		}
 		if label != "node" && label != "golang" {
-			continue
+			if label != "python" {
+				continue
+			}
 		}
 		image := "minikitex-" + name + ":local"
 		for _, c := range parseCompose(compose) {
@@ -1168,6 +1213,10 @@ func (s *server) syncRuntimeCompose() error {
 		fmt.Fprintf(&y, "  %s:\n    image: %s\n    hostname: %s\n    pull_policy: never\n    expose:\n      - \"80\"\n    labels:\n      psm: %s\n", e.svc, e.image, e.svc, e.svc)
 		if e.label == "golang" {
 			y.WriteString("    environment:\n      LISTEN: \"0.0.0.0:80\"\n")
+		} else {
+			if e.label == "python" {
+				y.WriteString("    environment:\n      LISTEN: \"0.0.0.0:80\"\n")
+			}
 		}
 	}
 	return os.WriteFile(path, []byte(y.String()), 0o644)
@@ -1209,12 +1258,16 @@ func scanRows(rows interface {
 	return out
 }
 
+func fmtTime(t time.Time) string {
+	return t.In(time.Local).Format("2006-01-02 15:04:05")
+}
+
 func stringify(v any) any {
 	switch x := v.(type) {
 	case []byte:
 		return string(x)
 	case time.Time:
-		return x.Format(time.RFC3339)
+		return fmtTime(x)
 	default:
 		return x
 	}

@@ -360,13 +360,13 @@ func cors(next http.Handler) http.Handler {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": "", "data": v})
 }
 
 func fail(w http.ResponseWriter, code int, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "data": nil})
 }
 
 func readJSON(r *http.Request, v any) error {

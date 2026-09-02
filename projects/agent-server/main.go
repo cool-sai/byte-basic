@@ -7,6 +7,14 @@ import (
 	"os"
 )
 
+func writeAPI(w http.ResponseWriter, data any, errStr string) {
+	w.Header().Set("Content-Type", "application/json")
+	if errStr != "" {
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": errStr, "data": data})
+}
+
 func main() {
 	addr := os.Getenv("LISTEN")
 	if addr == "" {
@@ -14,15 +22,13 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/hello", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		writeAPI(w, map[string]string{
 			"service": "agent-server",
 			"msg":     "hello from agent-server",
-		})
+		}, "")
 	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		writeAPI(w, "ok", "")
 	})
 	log.Println("agent-server", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))

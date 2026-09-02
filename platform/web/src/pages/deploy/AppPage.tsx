@@ -69,6 +69,9 @@ export default function AppPage() {
           {app?.label === "node" ? (
             <div className="text-xs text-slate-500">静态站 :80。发完后 TLB 把路径转到 {(compose[0] || name) + ":80"}。</div>
           ) : null}
+          {app?.label === "python" ? (
+            <div className="text-xs text-slate-500">Flask :80。发完后 TLB 把路径转到 {(compose[0] || name) + ":80"}。</div>
+          ) : null}
         </div>
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}

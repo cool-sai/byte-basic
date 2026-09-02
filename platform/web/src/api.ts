@@ -169,11 +169,17 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
-    data = { error: text };
+    data = { error: text, data: null };
+  }
+  const env = data as { error?: string; data?: T } | null;
+  if (env?.error) {
+    throw new Error(env.error);
   }
   if (!res.ok) {
-    const err = data as { error?: string } | null;
-    throw new Error(err?.error || res.statusText);
+    throw new Error(res.statusText);
+  }
+  if (env && typeof env === "object" && "data" in env) {
+    return env.data as T;
   }
   return data as T;
 }
