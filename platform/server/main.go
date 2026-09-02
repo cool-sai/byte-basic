@@ -52,6 +52,8 @@ func main() {
 	s := &server{root: root, db: db}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/services", s.getServices)
+	mux.HandleFunc("GET /api/scm/jobs", s.listJobs)
+	mux.HandleFunc("POST /api/scm/jobs", s.createJob)
 	mux.HandleFunc("GET /api/scm/builds", s.listBuilds)
 	mux.HandleFunc("POST /api/scm/builds", s.createBuild)
 	mux.HandleFunc("GET /api/bam/idls", s.listIDLs)
@@ -90,6 +92,13 @@ func waitDB(dsn string) (*sql.DB, error) {
 
 func migrate(db *sql.DB) error {
 	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS scm_job (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			name VARCHAR(64) NOT NULL UNIQUE,
+			repo_dir VARCHAR(512) NOT NULL,
+			script_path VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
 		`CREATE TABLE IF NOT EXISTS scm_build (
 			id BIGINT PRIMARY KEY AUTO_INCREMENT,
 			service VARCHAR(64) NOT NULL,
