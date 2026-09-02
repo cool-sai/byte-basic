@@ -56,6 +56,7 @@ func main() {
 	mux.HandleFunc("GET /api/scm/jobs/{name}", s.showJob)
 	mux.HandleFunc("GET /api/scm/jobs/{name}/branches", s.listBranches)
 	mux.HandleFunc("POST /api/scm/jobs", s.createJob)
+	mux.HandleFunc("PUT /api/scm/jobs/{name}", s.updateJob)
 	mux.HandleFunc("DELETE /api/scm/jobs/{name}", s.deleteJob)
 	mux.HandleFunc("GET /api/scm/builds", s.listBuilds)
 	mux.HandleFunc("GET /api/scm/builds/{id}", s.getBuild)
@@ -75,6 +76,14 @@ func main() {
 	mux.HandleFunc("GET /api/runtime", s.runtime)
 	mux.HandleFunc("GET /api/db/tables", s.listTables)
 	mux.HandleFunc("GET /api/db/tables/{name}", s.getTable)
+	mux.HandleFunc("GET /api/tlb/sites", s.listTlbSites)
+	mux.HandleFunc("POST /api/tlb/sites", s.createTlbSite)
+	mux.HandleFunc("GET /api/tlb/sites/{name}", s.showTlbSite)
+	mux.HandleFunc("DELETE /api/tlb/sites/{name}", s.deleteTlbSite)
+	mux.HandleFunc("POST /api/tlb/sites/{name}/routes", s.createTlbRoute)
+	mux.HandleFunc("PUT /api/tlb/sites/{name}/routes/{id}", s.updateTlbRoute)
+	mux.HandleFunc("DELETE /api/tlb/sites/{name}/routes/{id}", s.deleteTlbRoute)
+	mux.HandleFunc("POST /api/tlb/publish", s.publishTlb)
 
 	if web := getenv("WEB_DIR", ""); web != "" {
 		mux.Handle("/", spa(web))
@@ -159,6 +168,20 @@ func migrate(db *sql.DB) error {
 			log_text MEDIUMTEXT,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS tlb_site (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			name VARCHAR(64) NOT NULL UNIQUE,
+			host VARCHAR(255) NOT NULL UNIQUE,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS tlb_route (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			site_id BIGINT NOT NULL DEFAULT 0,
+			name VARCHAR(64) NOT NULL,
+			path_prefix VARCHAR(255) NOT NULL,
+			target VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 	for _, q := range stmts {
 		if _, err := db.Exec(q); err != nil {
@@ -169,16 +192,28 @@ func migrate(db *sql.DB) error {
 		`ALTER TABLE scm_job ADD COLUMN branch VARCHAR(255) NOT NULL DEFAULT ''`,
 		`ALTER TABLE scm_build ADD COLUMN branch VARCHAR(255) NOT NULL DEFAULT ''`,
 		`ALTER TABLE scm_build ADD COLUMN git_commit VARCHAR(64) NOT NULL DEFAULT ''`,
+		`ALTER TABLE scm_job ADD COLUMN label VARCHAR(64) NOT NULL DEFAULT ''`,
+		`ALTER TABLE tlb_route ADD COLUMN site_id BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE tlb_route DROP INDEX name`,
+		`ALTER TABLE tlb_route DROP INDEX path_prefix`,
+		`ALTER TABLE tlb_route ADD UNIQUE KEY tlb_route_site_path (site_id, path_prefix)`,
 	} {
-		if _, err := db.Exec(q); err != nil && !dupColumn(err) {
+		if _, err := db.Exec(q); err != nil && !skipAlter(err) {
 			return err
 		}
 	}
-	return nil
+	return seedTlb(db)
 }
 
 func dupColumn(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "duplicate column")
+}
+
+func skipAlter(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "duplicate column") ||
+		strings.Contains(s, "duplicate key name") ||
+		strings.Contains(s, "check that column/key exists")
 }
 
 func (s *server) getServices(w http.ResponseWriter, _ *http.Request) {

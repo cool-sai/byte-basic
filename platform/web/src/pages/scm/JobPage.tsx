@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Button, Message, Modal, Select, Space, Table, Tag, Typography } from "@arco-design/web-react";
+import { Button, Message, Modal, Select, Table, Tag, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, errMsg, type Build } from "../../api";
 import Crumbs from "./Crumbs";
+import JobForm from "./JobForm";
+import LabelIcon from "./LabelIcon";
 
 function statusColor(v: string) {
   if (v === "ok") {
@@ -20,9 +22,10 @@ export default function JobPage() {
   const loc = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [branch, setBranch] = useState("");
 
-  const { data, loading, error } = useRequest(
+  const { data, loading, error, refresh } = useRequest(
     async () => ({
       job: await api.scmJob(name),
       builds: (await api.builds(name)) || [],
@@ -52,17 +55,21 @@ export default function JobPage() {
   });
 
   return (
-    <Space direction="vertical" size="large" className="w-full">
+    <div className="flex w-full flex-col gap-6">
       <Crumbs jobName={name} />
       <div className="flex items-start justify-between gap-3">
         <div>
-          <Typography.Title heading={4} className="!mb-1">
+          <Typography.Title heading={4} className="!mb-1 inline-flex items-center gap-2">
+            <LabelIcon label={job?.label} />
             {job?.name || name}
           </Typography.Title>
           <div className="text-xs text-slate-500">Git {job?.gitUrl}</div>
           <div className="text-xs text-slate-500">脚本 {job?.scriptPath}</div>
         </div>
-        <Space>
+        <div className="flex items-center gap-2">
+          <Button disabled={!job} onClick={() => setEditOpen(true)}>
+            编辑
+          </Button>
           <Button
             status="danger"
             onClick={() => {
@@ -86,34 +93,9 @@ export default function JobPage() {
           <Button type="primary" onClick={() => setOpen(true)}>
             编译
           </Button>
-        </Space>
+        </div>
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
-
-      <Modal
-        title="选择分支"
-        visible={open}
-        onCancel={() => setOpen(false)}
-        onOk={() => void start(branch)}
-        confirmLoading={starting}
-        okButtonProps={{ disabled: !branch }}
-      >
-        {brErr ? <Typography.Text type="error">{errMsg(brErr)}</Typography.Text> : null}
-        <Select
-          className="w-full"
-          loading={brLoading}
-          value={branch || undefined}
-          onChange={setBranch}
-          placeholder="选择要编译的分支"
-          showSearch
-        >
-          {branches.map((b) => (
-            <Select.Option key={b.name} value={b.name}>
-              {b.name}
-            </Select.Option>
-          ))}
-        </Select>
-      </Modal>
 
       <Typography.Title heading={5}>编译历史</Typography.Title>
       <Table
@@ -141,6 +123,45 @@ export default function JobPage() {
           { title: "时间", dataIndex: "createdAt" },
         ]}
       />
-    </Space>
+      <JobForm
+        visible={editOpen}
+        job={job}
+        onCancel={() => setEditOpen(false)}
+        onOk={(n, g, s, label) => {
+          void api.updateScmJob(n, g, s, label).then(
+            () => {
+              Message.success("已保存");
+              setEditOpen(false);
+              void refresh();
+            },
+            (e) => Message.error(errMsg(e)),
+          );
+        }}
+      />
+      <Modal
+        title="选择分支"
+        visible={open}
+        onCancel={() => setOpen(false)}
+        onOk={() => void start(branch)}
+        confirmLoading={starting}
+        okButtonProps={{ disabled: !branch }}
+      >
+        {brErr ? <Typography.Text type="error">{errMsg(brErr)}</Typography.Text> : null}
+        <Select
+          className="w-full"
+          loading={brLoading}
+          value={branch || undefined}
+          onChange={setBranch}
+          placeholder="选择要编译的分支"
+          showSearch
+        >
+          {branches.map((b) => (
+            <Select.Option key={b.name} value={b.name}>
+              {b.name}
+            </Select.Option>
+          ))}
+        </Select>
+      </Modal>
+    </div>
   );
 }

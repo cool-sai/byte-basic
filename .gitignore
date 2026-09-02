@@ -1,5 +1,6 @@
 /bin/
 /artifacts/
 /scm-work/
+/deploy/runtime.yml
 platform/web/node_modules
 platform/web/dist

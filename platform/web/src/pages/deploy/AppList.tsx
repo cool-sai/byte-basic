@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Button, Card, Input, Message, Modal, Select, Space, Spin, Typography } from "@arco-design/web-react";
+import { Button, Card, Input, Message, Modal, Select, Spin, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, errMsg } from "../../api";
+import LabelIcon from "../scm/LabelIcon";
 import Crumbs from "./Crumbs";
 
 export default function AppList() {
@@ -50,7 +51,7 @@ export default function AppList() {
   };
 
   return (
-    <Space direction="vertical" size="large" className="w-full">
+    <div className="flex w-full flex-col gap-6">
       <Crumbs />
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -58,7 +59,7 @@ export default function AppList() {
             部署项目
           </Typography.Title>
           <Typography.Text type="secondary">
-            先建项目并关联 SCM，点进去选产物打镜像启动。名称要对上 compose 镜像：user / order / gateway / etcdui。
+            注册服务名并关联 SCM。golang 产物当二进制启动；node 产物打成 nginx 静态站点。不在 compose 里的前端服务，部署时会注册进去。
           </Typography.Text>
         </div>
         <Button type="primary" onClick={() => setCreating(true)}>
@@ -67,6 +68,27 @@ export default function AppList() {
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
 
+      <Spin loading={loading} className="w-full">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {apps.map((a) => (
+            <Card
+              key={a.name}
+              title={
+                <span className="inline-flex items-center gap-2">
+                  <LabelIcon label={a.label} />
+                  {a.name}
+                </span>
+              }
+              hoverable
+              className="cursor-pointer"
+              onClick={() => navigate("/deploy/" + a.name)}
+            >
+              <div className="text-xs text-slate-500">SCM {a.scmName}</div>
+              <div className="text-xs text-slate-500">Compose {(a.compose || []).join(", ")}</div>
+            </Card>
+          ))}
+        </div>
+      </Spin>
       <Modal
         title="新建部署项目"
         visible={creating}
@@ -75,30 +97,34 @@ export default function AppList() {
         confirmLoading={submitting}
         okButtonProps={{ disabled: !name.trim() || !scmName }}
       >
-        <Space direction="vertical" className="w-full" size="medium">
+        <div className="flex w-full flex-col gap-4">
           <Input addBefore="名称" value={name} onChange={fillName} placeholder="user" />
-          <Select value={scmName || undefined} onChange={setScmName} placeholder="关联 SCM" className="w-full">
+          <Select
+            value={scmName || undefined}
+            onChange={(v: string) => {
+              setScmName(v);
+              const j = jobs.find((x) => x.name === v);
+              if (j && !name) {
+                setName(j.name);
+              }
+              if (j && !compose) {
+                const hit = services.find((s) => s.name === v);
+                setCompose(hit ? hit.compose.join(",") : j.name);
+              }
+            }}
+            placeholder="关联 SCM"
+            className="w-full"
+          >
             {jobs.map((j) => (
               <Select.Option key={j.name} value={j.name}>
-                {j.name}
+                {(j.label || "golang") + " · " + j.name}
               </Select.Option>
             ))}
           </Select>
           <Input addBefore="Compose" value={compose} onChange={setCompose} placeholder="user-1,user-2" />
-          <Typography.Text type="secondary">Compose 不填时：名称能对上目录就用目录里的服务，否则就起同名服务。</Typography.Text>
-        </Space>
-      </Modal>
-
-      <Spin loading={loading} className="w-full">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {apps.map((a) => (
-            <Card key={a.name} title={a.name} hoverable className="cursor-pointer" onClick={() => navigate("/deploy/" + a.name)}>
-              <div className="text-xs text-slate-500">SCM {a.scmName}</div>
-              <div className="text-xs text-slate-500">Compose {(a.compose || []).join(", ")}</div>
-            </Card>
-          ))}
+          <Typography.Text type="secondary">Compose 不填时：目录里有同名服务就用它，否则用服务名自己起一份（node 静态站）。</Typography.Text>
         </div>
-      </Spin>
-    </Space>
+      </Modal>
+    </div>
   );
 }

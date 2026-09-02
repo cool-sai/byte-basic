@@ -54,7 +54,7 @@ func main() {
 			log.Println(pattern, "->", b.name+"."+rpcMethod)
 		}
 	}
-	log.Println("gateway", addr)
+	log.Println("agw sidecar", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }
 

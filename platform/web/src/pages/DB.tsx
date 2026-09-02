@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Space, Table, Typography } from "@arco-design/web-react";
+import { Table, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { api, errMsg, type DbTable } from "../api";
 
@@ -30,7 +30,7 @@ export default function DB() {
   const err = tablesErr || detailErr;
 
   return (
-    <Space direction="vertical" size="medium" className="w-full">
+    <div className="flex w-full flex-col gap-4">
       <div>
         <Typography.Title heading={4} className="!mb-1">
           MySQL
@@ -56,7 +56,7 @@ export default function DB() {
             { title: "引擎", dataIndex: "engine" },
           ]}
         />
-        <Space direction="vertical" className="w-full">
+        <div className="flex w-full flex-col gap-2">
           <Table
             rowKey="name"
             pagination={false}
@@ -83,8 +83,8 @@ export default function DB() {
               render: (v: unknown) => (v == null ? "NULL" : String(v)),
             }))}
           />
-        </Space>
+        </div>
       </div>
-    </Space>
+    </div>
   );
 }

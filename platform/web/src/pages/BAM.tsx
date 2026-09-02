@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Message, Space, Spin, Table, Tag, Typography } from "@arco-design/web-react";
+import { Button, Input, Message, Spin, Table, Tag, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { api, errMsg, type Field, type IdlView } from "../api";
 
@@ -38,7 +38,7 @@ export default function BAM() {
   const methods = cur?.methods || [];
 
   return (
-    <Space direction="vertical" size="medium" className="w-full">
+    <div className="flex w-full flex-col gap-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <Typography.Title heading={4} className="!mb-1">
@@ -52,7 +52,7 @@ export default function BAM() {
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
       <Spin loading={loading} className="w-full">
-        <Space wrap>
+        <div className="flex flex-wrap gap-2">
           {idls.map((x) => (
             <Button
               key={x.name}
@@ -65,7 +65,7 @@ export default function BAM() {
               {x.name}.thrift {x.httpApis ? `(HTTP ${x.httpApis})` : "(RPC)"}
             </Button>
           ))}
-        </Space>
+        </div>
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
           <Input.TextArea
             value={content}
@@ -123,6 +123,6 @@ export default function BAM() {
           </div>
         </div>
       </Spin>
-    </Space>
+    </div>
   );
 }

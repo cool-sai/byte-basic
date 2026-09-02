@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Card, Message, Space, Spin, Tag, Typography } from "@arco-design/web-react";
+import { Card, Message, Spin, Tag, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { useLocation, useParams } from "react-router-dom";
 import { api, errMsg } from "../../api";
@@ -45,7 +45,7 @@ export default function BuildPage() {
   const live = build?.status === "running";
 
   return (
-    <Space direction="vertical" size="large" className="w-full">
+    <div className="flex w-full flex-col gap-6">
       <Crumbs jobName={name} version={build?.version} />
       <Spin loading={loading && !build} className="w-full">
         <div>
@@ -57,14 +57,14 @@ export default function BuildPage() {
           </Typography.Text>
         </div>
         {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
-        <Space className="mt-3">
+        <div className="mt-3 flex items-center gap-2">
           {build ? <Tag color={statusColor(build.status)}>{build.status}</Tag> : null}
           <Typography.Text type="secondary">{build?.createdAt}</Typography.Text>
-        </Space>
+        </div>
         <Card title="日志" className="mt-4">
           <LogBox text={log} live={live} />
         </Card>
       </Spin>
-    </Space>
+    </div>
   );
 }

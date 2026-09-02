@@ -24,6 +24,25 @@ type scmJob struct {
 	GitURL     string
 	ScriptPath string
 	Branch     string
+	Label      string
+}
+
+func jsonJob(j scmJob) map[string]any {
+	return map[string]any{
+		"id": j.ID, "name": j.Name, "gitUrl": j.GitURL,
+		"scriptPath": j.ScriptPath, "branch": j.Branch, "label": j.Label,
+	}
+}
+
+func checkLabel(s string) error {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return fmt.Errorf("label required")
+	}
+	if !jobName.MatchString(s) {
+		return fmt.Errorf("bad label")
+	}
+	return nil
 }
 
 func checkBranch(s string) error {
@@ -38,13 +57,13 @@ func checkBranch(s string) error {
 }
 
 func (s *server) listJobs(w http.ResponseWriter, _ *http.Request) {
-	rows, err := s.db.Query(`SELECT id, name, repo_dir, script_path, branch, created_at FROM scm_job ORDER BY id DESC`)
+	rows, err := s.db.Query(`SELECT id, name, repo_dir, script_path, branch, label, created_at FROM scm_job ORDER BY id DESC`)
 	if err != nil {
 		fail(w, 500, err)
 		return
 	}
 	defer rows.Close()
-	jobs := scanRows(rows, "id", "name", "gitUrl", "scriptPath", "branch", "createdAt")
+	jobs := scanRows(rows, "id", "name", "gitUrl", "scriptPath", "branch", "label", "createdAt")
 	if jobs == nil {
 		jobs = []map[string]any{}
 	}
@@ -56,6 +75,7 @@ func (s *server) createJob(w http.ResponseWriter, r *http.Request) {
 		Name       string `json:"name"`
 		GitURL     string `json:"gitUrl"`
 		ScriptPath string `json:"scriptPath"`
+		Label      string `json:"label"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		fail(w, 400, err)
@@ -76,17 +96,22 @@ func (s *server) createJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
+	label := strings.TrimSpace(body.Label)
+	if err := checkLabel(label); err != nil {
+		fail(w, 400, err)
+		return
+	}
 	out, err := exec.Command("git", "ls-remote", "--exit-code", gitURL, "HEAD").CombinedOutput()
 	if err != nil {
 		fail(w, 400, fmt.Errorf("git ls-remote: %w\n%s", err, out))
 		return
 	}
-	_, err = s.db.Exec(`INSERT INTO scm_job (name, repo_dir, script_path) VALUES (?,?,?)`, name, gitURL, scriptPath)
+	_, err = s.db.Exec(`INSERT INTO scm_job (name, repo_dir, script_path, label) VALUES (?,?,?,?)`, name, gitURL, scriptPath, label)
 	if err != nil {
 		fail(w, 400, fmt.Errorf("create scm: %w", err))
 		return
 	}
-	writeJSON(w, map[string]any{"name": name, "gitUrl": gitURL, "scriptPath": scriptPath})
+	writeJSON(w, map[string]any{"name": name, "gitUrl": gitURL, "scriptPath": scriptPath, "label": label})
 }
 
 func (s *server) showJob(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +120,58 @@ func (s *server) showJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, err)
 		return
 	}
-	writeJSON(w, map[string]any{"id": j.ID, "name": j.Name, "gitUrl": j.GitURL, "scriptPath": j.ScriptPath, "branch": j.Branch})
+	writeJSON(w, jsonJob(j))
+}
+
+func (s *server) updateJob(w http.ResponseWriter, r *http.Request) {
+	j, err := s.getJob(r.PathValue("name"))
+	if err != nil {
+		fail(w, 404, err)
+		return
+	}
+	var body struct {
+		GitURL     string `json:"gitUrl"`
+		ScriptPath string `json:"scriptPath"`
+		Label      string `json:"label"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	gitURL := strings.TrimSpace(body.GitURL)
+	if gitURL == "" {
+		fail(w, 400, fmt.Errorf("git url required"))
+		return
+	}
+	scriptPath := strings.TrimSpace(body.ScriptPath)
+	if err := checkScriptRel(scriptPath); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	label := strings.TrimSpace(body.Label)
+	if err := checkLabel(label); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	if gitURL != j.GitURL {
+		out, err := exec.Command("git", "ls-remote", "--exit-code", gitURL, "HEAD").CombinedOutput()
+		if err != nil {
+			fail(w, 400, fmt.Errorf("git ls-remote: %w\n%s", err, out))
+			return
+		}
+	}
+	_, err = s.db.Exec(
+		`UPDATE scm_job SET repo_dir=?, script_path=?, label=? WHERE name=?`,
+		gitURL, scriptPath, label, j.Name,
+	)
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	j.GitURL = gitURL
+	j.ScriptPath = scriptPath
+	j.Label = label
+	writeJSON(w, jsonJob(j))
 }
 
 func (s *server) deleteJob(w http.ResponseWriter, r *http.Request) {
@@ -130,8 +206,8 @@ func (s *server) deleteJob(w http.ResponseWriter, r *http.Request) {
 func (s *server) getJob(name string) (scmJob, error) {
 	var j scmJob
 	err := s.db.QueryRow(
-		`SELECT id, name, repo_dir, script_path, branch FROM scm_job WHERE name=?`, name,
-	).Scan(&j.ID, &j.Name, &j.GitURL, &j.ScriptPath, &j.Branch)
+		`SELECT id, name, repo_dir, script_path, branch, label FROM scm_job WHERE name=?`, name,
+	).Scan(&j.ID, &j.Name, &j.GitURL, &j.ScriptPath, &j.Branch, &j.Label)
 	if err == sql.ErrNoRows {
 		return j, fmt.Errorf("unknown scm %s", name)
 	}
@@ -655,6 +731,7 @@ type deployApp struct {
 	Name    string
 	ScmName string
 	Compose []string
+	Label   string
 }
 
 func parseCompose(s string) []string {
@@ -672,12 +749,16 @@ func parseCompose(s string) []string {
 func jsonApp(a deployApp, created string) map[string]any {
 	return map[string]any{
 		"id": a.ID, "name": a.Name, "scmName": a.ScmName,
-		"compose": a.Compose, "createdAt": created,
+		"compose": a.Compose, "label": a.Label, "createdAt": created,
 	}
 }
 
 func (s *server) listApps(w http.ResponseWriter, _ *http.Request) {
-	rows, err := s.db.Query(`SELECT id, name, scm_name, compose, created_at FROM deploy_app ORDER BY id DESC`)
+	rows, err := s.db.Query(`
+		SELECT a.id, a.name, a.scm_name, a.compose, a.created_at, IFNULL(j.label,'')
+		FROM deploy_app a
+		LEFT JOIN scm_job j ON j.name = a.scm_name
+		ORDER BY a.id DESC`)
 	if err != nil {
 		fail(w, 500, err)
 		return
@@ -688,7 +769,7 @@ func (s *server) listApps(w http.ResponseWriter, _ *http.Request) {
 		var a deployApp
 		var compose, created string
 		var t time.Time
-		if err := rows.Scan(&a.ID, &a.Name, &a.ScmName, &compose, &t); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.ScmName, &compose, &t, &a.Label); err != nil {
 			continue
 		}
 		a.Compose = parseCompose(compose)
@@ -755,8 +836,9 @@ func (s *server) getApp(name string) (deployApp, error) {
 	var a deployApp
 	var compose string
 	err := s.db.QueryRow(
-		`SELECT id, name, scm_name, compose FROM deploy_app WHERE name=?`, name,
-	).Scan(&a.ID, &a.Name, &a.ScmName, &compose)
+		`SELECT a.id, a.name, a.scm_name, a.compose, IFNULL(j.label,'')
+		 FROM deploy_app a LEFT JOIN scm_job j ON j.name = a.scm_name WHERE a.name=?`, name,
+	).Scan(&a.ID, &a.Name, &a.ScmName, &compose, &a.Label)
 	if err == sql.ErrNoRows {
 		return a, fmt.Errorf("unknown deploy %s", name)
 	}
@@ -848,6 +930,15 @@ func (s *server) createDeploy(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, fmt.Errorf("artifact not found: %s", src))
 		return
 	}
+	job, err := s.getJob(app.ScmName)
+	if err != nil {
+		fail(w, 400, err)
+		return
+	}
+	label := job.Label
+	if label == "" {
+		label = "golang"
+	}
 
 	lg, err := startSSE(w)
 	if err != nil {
@@ -878,13 +969,28 @@ func (s *server) createDeploy(w http.ResponseWriter, r *http.Request) {
 		lg.done(out)
 	}
 
-	fmt.Fprintf(lg, "$ docker build -t %s -t %s\n(context %s)\n", imageVer, imageLocal, filepath.Dir(src))
-	cmd := exec.Command("docker", "build", "--progress=plain", "-t", imageVer, "-t", imageLocal, "-f", "-", filepath.Dir(src))
-	cmd.Stdin = strings.NewReader(fmt.Sprintf("FROM scratch\nCOPY %s /app\nENTRYPOINT [\"/app\"]\n", filepath.Base(src)))
-	cmd.Stdout = lg
-	cmd.Stderr = lg
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(lg, "%s\n", err)
+	fmt.Fprintf(lg, "$ docker build -t %s -t %s  label=%s\n", imageVer, imageLocal, label)
+	if label == "node" {
+		if err := s.buildNodeImage(lg, src, imageVer, imageLocal); err != nil {
+			fmt.Fprintf(lg, "%s\n", err)
+			finish("fail", err)
+			return
+		}
+	} else {
+		fmt.Fprintf(lg, "(context %s)\n", filepath.Dir(src))
+		cmd := exec.Command("docker", "build", "--progress=plain", "-t", imageVer, "-t", imageLocal, "-f", "-", filepath.Dir(src))
+		cmd.Stdin = strings.NewReader(fmt.Sprintf("FROM scratch\nCOPY %s /app\nENTRYPOINT [\"/app\"]\n", filepath.Base(src)))
+		cmd.Stdout = lg
+		cmd.Stderr = lg
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(lg, "%s\n", err)
+			finish("fail", err)
+			return
+		}
+	}
+
+	if err := s.syncRuntimeCompose(); err != nil {
+		fmt.Fprintf(lg, "runtime compose: %s\n", err)
 		finish("fail", err)
 		return
 	}
@@ -921,19 +1027,144 @@ func (s *server) runtime(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, items)
 }
 
-func (s *server) compose(args ...string) (string, error) {
-	cmd := exec.Command("docker", append([]string{"compose"}, args...)...)
+func (s *server) composeCmd(args ...string) *exec.Cmd {
+	prefix := []string{"compose"}
+	rt := filepath.Join(s.root, "deploy", "runtime.yml")
+	if _, err := os.Stat(rt); err == nil {
+		prefix = append(prefix, "-f", "docker-compose.yml", "-f", "deploy/runtime.yml")
+	}
+	cmd := exec.Command("docker", append(prefix, args...)...)
 	cmd.Dir = s.root
-	b, err := cmd.CombinedOutput()
+	return cmd
+}
+
+func (s *server) compose(args ...string) (string, error) {
+	b, err := s.composeCmd(args...).CombinedOutput()
 	return string(b), err
 }
 
 func (s *server) composeTo(w io.Writer, args ...string) error {
-	cmd := exec.Command("docker", append([]string{"compose"}, args...)...)
-	cmd.Dir = s.root
+	cmd := s.composeCmd(args...)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	return cmd.Run()
+}
+
+const nodeWebDockerfile = `FROM alpine:3.20
+RUN apk add --no-cache nginx && mkdir -p /run/nginx
+COPY html /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/nginx.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+`
+
+const nodeWebNginx = `worker_processes auto;
+error_log /dev/stderr warn;
+pid /run/nginx/nginx.pid;
+events {
+    worker_connections 1024;
+}
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    server {
+        listen 80;
+        root /usr/share/nginx/html;
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+    }
+}
+`
+
+func (s *server) buildNodeImage(lg io.Writer, src, imageVer, imageLocal string) error {
+	tmp, err := os.MkdirTemp("", "mk-node-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	html := filepath.Join(tmp, "html")
+	if err := os.MkdirAll(html, 0o755); err != nil {
+		return err
+	}
+	fmt.Fprintf(lg, "unpack %s\n", src)
+	untar := exec.Command("tar", "-xf", src, "-C", html)
+	untar.Stdout = lg
+	untar.Stderr = lg
+	if err := untar.Run(); err != nil {
+		return fmt.Errorf("unpack node artifact: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "nginx.conf"), []byte(nodeWebNginx), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "Dockerfile"), []byte(nodeWebDockerfile), 0o644); err != nil {
+		return err
+	}
+	build := exec.Command("docker", "build", "--progress=plain", "-t", imageVer, "-t", imageLocal, tmp)
+	build.Stdout = lg
+	build.Stderr = lg
+	return build.Run()
+}
+
+func (s *server) syncRuntimeCompose() error {
+	cmd := exec.Command("docker", "compose", "-f", "docker-compose.yml", "config", "--services")
+	cmd.Dir = s.root
+	b, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("compose config: %w\n%s", err, b)
+	}
+	main := map[string]bool{}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			main[line] = true
+		}
+	}
+	rows, err := s.db.Query(`
+		SELECT a.name, a.compose, IFNULL(j.label,'')
+		FROM deploy_app a LEFT JOIN scm_job j ON j.name = a.scm_name`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type extra struct{ svc, image string }
+	var extras []extra
+	seen := map[string]bool{}
+	for rows.Next() {
+		var name, compose, label string
+		if err := rows.Scan(&name, &compose, &label); err != nil {
+			return err
+		}
+		if label != "node" {
+			continue
+		}
+		image := "minikitex-" + name + ":local"
+		for _, c := range parseCompose(compose) {
+			if main[c] || seen[c] {
+				continue
+			}
+			seen[c] = true
+			extras = append(extras, extra{svc: c, image: image})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	path := filepath.Join(s.root, "deploy", "runtime.yml")
+	if len(extras) == 0 {
+		_ = os.Remove(path)
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	var y strings.Builder
+	y.WriteString("services:\n")
+	for _, e := range extras {
+		fmt.Fprintf(&y, "  %s:\n    image: %s\n    hostname: %s\n    pull_policy: never\n    expose:\n      - \"80\"\n    labels:\n      psm: %s\n", e.svc, e.image, e.svc, e.svc)
+	}
+	return os.WriteFile(path, []byte(y.String()), 0o644)
 }
 
 func dockerArch() string {

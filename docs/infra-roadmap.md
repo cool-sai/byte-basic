@@ -168,7 +168,8 @@ open http://127.0.0.1:5173
 | SCM 编译 | SCM 出制品 | `go build` linux 二进制，落到 `artifacts/<服务>/<版本>/` |
 | BAM IDL | BAM 托管契约 | 编辑 `idl/*.thrift`，解析 agw.uri 和入参/出参 |
 | AGW 网关 | AGW 开通 HTTP | 重启 gateway，让它重新读挂载的 IDL |
-| 部署 | 发布平台选版本 | 拷制品到 `bin/`，`compose build` + `up --no-deps` |
+| TLB | 流量入口 | 三级域名各一份配置，nginx 按 Host + 路径转到服务，对外 :80 |
+| 部署 | 发布平台选版本 | golang 打 scratch 镜像；node 打 nginx 静态镜像，再 `compose up` |
 
 改 URL：BAM 改 `agw.uri` 保存 → AGW 点发布。不用重编 order。
 改代码：SCM 编译 → 部署选这个版本。

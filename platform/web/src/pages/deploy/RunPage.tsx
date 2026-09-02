@@ -1,4 +1,4 @@
-import { Card, Space, Spin, Tag, Typography } from "@arco-design/web-react";
+import { Card, Spin, Tag, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { useLocation, useParams } from "react-router-dom";
 import { api, errMsg } from "../../api";
@@ -13,7 +13,7 @@ export default function RunPage() {
   });
 
   return (
-    <Space direction="vertical" size="large" className="w-full">
+    <div className="flex w-full flex-col gap-6">
       <Crumbs appName={name} version={run?.version} />
       <Spin loading={loading} className="w-full">
         <div>
@@ -23,14 +23,14 @@ export default function RunPage() {
           <Typography.Text type="secondary">{run?.service}</Typography.Text>
         </div>
         {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
-        <Space className="mt-3">
+        <div className="mt-3 flex items-center gap-2">
           {run ? <Tag color={run.status === "ok" ? "green" : "red"}>{run.status}</Tag> : null}
           <Typography.Text type="secondary">{run?.createdAt}</Typography.Text>
-        </Space>
+        </div>
         <Card title="日志" className="mt-4">
           <LogBox text={run?.log || ""} />
         </Card>
       </Spin>
-    </Space>
+    </div>
   );
 }

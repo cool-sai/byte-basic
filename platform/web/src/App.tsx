@@ -6,6 +6,9 @@ import JobPage from "./pages/scm/JobPage";
 import BuildPage from "./pages/scm/BuildPage";
 import BAM from "./pages/BAM";
 import AGW from "./pages/AGW";
+import TLB from "./pages/TLB";
+import SiteList from "./pages/tlb/SiteList";
+import SitePage from "./pages/tlb/SitePage";
 import Deploy from "./pages/Deploy";
 import AppList from "./pages/deploy/AppList";
 import AppPage from "./pages/deploy/AppPage";
@@ -16,6 +19,7 @@ const TABS = [
   ["scm", "SCM 编译"],
   ["bam", "BAM IDL"],
   ["agw", "AGW 网关"],
+  ["tlb", "TLB"],
   ["deploy", "部署"],
   ["db", "MySQL"],
 ] as const;
@@ -31,7 +35,7 @@ export default function App() {
           <Typography.Title heading={5} className="!mb-0 !text-white">
             minikitex
           </Typography.Title>
-          <Typography.Text className="text-xs text-white/55">SCM · BAM · AGW · 部署</Typography.Text>
+          <Typography.Text className="text-xs text-white/55">SCM · BAM · AGW · TLB · 部署</Typography.Text>
         </div>
         <Menu theme="dark" selectedKeys={[tab]} onClickMenuItem={(key) => navigate("/" + key)}>
           {TABS.map(([id, label]) => (
@@ -49,6 +53,10 @@ export default function App() {
           </Route>
           <Route path="/bam" element={<BAM />} />
           <Route path="/agw" element={<AGW />} />
+          <Route path="/tlb" element={<TLB />}>
+            <Route index element={<SiteList />} />
+            <Route path=":name" element={<SitePage />} />
+          </Route>
           <Route path="/deploy" element={<Deploy />}>
             <Route index element={<AppList />} />
             <Route path=":name" element={<AppPage />} />

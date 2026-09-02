@@ -118,6 +118,7 @@ services:
       psm: order
     ports:
       - "8889:8889"
+      - "18080:8080"
     expose:
       - "9091"
     depends_on:
@@ -126,26 +127,24 @@ services:
       - user-2
       - jaeger
 
+  # 分布式 AGW：和 order 共用网络，HTTP 进这台实例，本机转 RPC。
   gateway:
     build:
       context: .
       args:
         BIN: gateway
     image: minikitex-gateway:local
-    hostname: gateway-1
+    network_mode: "service:order"
     environment:
       LISTEN: "0.0.0.0:8080"
-      ORDER_ADDR: "order:8889"
-      USER_ADDR: "user-1:8888"
-      IDL_DIR: /idl
-      INSTANCE: gateway-1
+      IDL: /idl/order.thrift
+      ORDER_ADDR: "127.0.0.1:8889"
+      INSTANCE: order-agw
       PSM: "gateway"
     labels:
       psm: gateway
     volumes:
       - ${HOST_ROOT:-.}/idl:/idl:ro
-    ports:
-      - "18080:8080"
     depends_on:
       - order
 
@@ -207,6 +206,22 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+
+  # TLB：对外 HTTP 入口，按路径转到前端 / 平台 API / 各服务 AGW。
+  tlb:
+    build:
+      context: .
+      dockerfile: Dockerfile.tlb
+    image: minikitex-tlb:local
+    hostname: tlb
+    labels:
+      psm: tlb
+    ports:
+      - "80:80"
+    volumes:
+      - ${HOST_ROOT:-.}/tlb/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - platform
 
   mysql:
     image: mysql:8.0.40

@@ -1,17 +1,17 @@
 import { useState } from "react";
-import { Button, Card, Input, Message, Modal, Space, Spin, Typography } from "@arco-design/web-react";
+import { Button, Card, Message, Modal, Spin, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api, errMsg } from "../../api";
+import { api, errMsg, type ScmJob } from "../../api";
 import Crumbs from "./Crumbs";
+import JobForm from "./JobForm";
+import LabelIcon from "./LabelIcon";
 
 export default function JobList() {
   const loc = useLocation();
   const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const [gitUrl, setGitUrl] = useState("");
-  const [script, setScript] = useState("scripts/scm/user.sh");
-  const [creating, setCreating] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<ScmJob | null>(null);
 
   const {
     data: jobs = [],
@@ -29,14 +29,15 @@ export default function JobList() {
     onError: (e) => Message.error(errMsg(e)),
   });
 
-  const { runAsync: submit, loading: submitting } = useRequest(
-    (n: string, g: string, s: string) => api.createScmJob(n, g, s),
+  const { runAsync: save, loading: saving } = useRequest(
+    (n: string, g: string, s: string, label: string, isEdit: boolean) =>
+      isEdit ? api.updateScmJob(n, g, s, label) : api.createScmJob(n, g, s, label),
     {
       manual: true,
-      onSuccess: (_d, [n]) => {
-        Message.success("已新建 " + n);
-        setName("");
-        setCreating(false);
+      onSuccess: (_d, [n, _g, _s, _l, isEdit]) => {
+        Message.success(isEdit ? "已保存 " + n : "已新建 " + n);
+        setFormOpen(false);
+        setEditing(null);
         void refresh();
       },
       onError: (e) => Message.error(errMsg(e)),
@@ -44,7 +45,7 @@ export default function JobList() {
   );
 
   return (
-    <Space direction="vertical" size="large" className="w-full">
+    <div className="flex w-full flex-col gap-6">
       <Crumbs />
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -52,58 +53,63 @@ export default function JobList() {
             SCM 编译任务
           </Typography.Title>
           <Typography.Text type="secondary">
-            点进任务编译；编译时选分支，进当次记录看实时日志。
+            点进任务编译；编译时选分支，进当次记录看实时日志。label 用来区分 golang / node。
           </Typography.Text>
         </div>
-        <Button type="primary" onClick={() => setCreating(true)}>
+        <Button
+          type="primary"
+          onClick={() => {
+            setEditing(null);
+            setFormOpen(true);
+          }}
+        >
           新建任务
         </Button>
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
-
-      <Modal
-        title="新建编译任务"
-        visible={creating}
-        onCancel={() => setCreating(false)}
-        onOk={() => void submit(name.trim(), gitUrl.trim(), script.trim())}
-        confirmLoading={submitting}
-        okButtonProps={{ disabled: !name.trim() || !gitUrl.trim() || !script.trim() }}
-      >
-        <Space direction="vertical" className="w-full" size="medium">
-          <Input addBefore="名称" value={name} onChange={setName} placeholder="user" />
-          <Input addBefore="Git" value={gitUrl} onChange={setGitUrl} placeholder="https://github.com/coolCicada/byte-basic.git" />
-          <Input addBefore="脚本" value={script} onChange={setScript} placeholder="scripts/scm/user.sh" />
-          <Typography.Text type="secondary">
-            本仓库示例脚本：scripts/scm/user.sh、order.sh、gateway.sh、etcdui.sh、platform-web.sh
-          </Typography.Text>
-        </Space>
-      </Modal>
 
       <Spin loading={loading} className="w-full">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {jobs.map((j) => (
             <Card
               key={j.name}
-              title={j.name}
+              title={
+                <span className="inline-flex items-center gap-2">
+                  <LabelIcon label={j.label} />
+                  {j.name}
+                </span>
+              }
               hoverable
               className="cursor-pointer"
               onClick={() => navigate("/scm/" + j.name)}
               extra={
-                <Button
-                  size="mini"
-                  status="danger"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    Modal.confirm({
-                      title: "删除任务 " + j.name + "？",
-                      content: "编译记录、clone、产物都会删掉。",
-                      okButtonProps: { status: "danger" },
-                      onOk: () => remove(j.name),
-                    });
-                  }}
-                >
-                  删除
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="mini"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditing(j);
+                      setFormOpen(true);
+                    }}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    size="mini"
+                    status="danger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      Modal.confirm({
+                        title: "删除任务 " + j.name + "？",
+                        content: "编译记录、clone、产物都会删掉。",
+                        okButtonProps: { status: "danger" },
+                        onOk: () => remove(j.name),
+                      });
+                    }}
+                  >
+                    删除
+                  </Button>
+                </div>
               }
             >
               <div className="text-xs text-slate-500">Git {j.gitUrl}</div>
@@ -112,6 +118,16 @@ export default function JobList() {
           ))}
         </div>
       </Spin>
-    </Space>
+      <JobForm
+        visible={formOpen}
+        job={editing}
+        loading={saving}
+        onCancel={() => {
+          setFormOpen(false);
+          setEditing(null);
+        }}
+        onOk={(n, g, s, label) => void save(n, g, s, label, Boolean(editing))}
+      />
+    </div>
   );
 }

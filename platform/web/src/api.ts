@@ -11,6 +11,7 @@ export type ScmJob = {
   gitUrl: string;
   scriptPath: string;
   branch?: string;
+  label?: string;
   createdAt: string;
 };
 
@@ -87,6 +88,7 @@ export type DeployApp = {
   name: string;
   scmName: string;
   compose: string[] | null;
+  label?: string;
   createdAt?: string;
 };
 
@@ -110,6 +112,30 @@ export type Container = {
   Image?: string;
   Status?: string;
   State?: string;
+};
+
+export type TlbRoute = {
+  id: number;
+  name: string;
+  path: string;
+  target: string;
+  createdAt?: string;
+};
+
+export type TlbSite = {
+  id: number;
+  name: string;
+  host: string;
+  routes: number;
+  createdAt?: string;
+};
+
+export type TlbSiteDetail = {
+  id: number;
+  name: string;
+  host: string;
+  routes: TlbRoute[];
+  zone?: string;
 };
 
 export type DbTable = {
@@ -228,10 +254,15 @@ export const api = {
   services: () => req<Service[]>("/api/services"),
   scmJobs: () => req<ScmJobs>("/api/scm/jobs"),
   scmJob: (name: string) => req<ScmJob>(`/api/scm/jobs/${name}`),
-  createScmJob: (name: string, gitUrl: string, scriptPath: string) =>
+  createScmJob: (name: string, gitUrl: string, scriptPath: string, label: string) =>
     req<ScmJob>("/api/scm/jobs", {
       method: "POST",
-      body: JSON.stringify({ name, gitUrl, scriptPath }),
+      body: JSON.stringify({ name, gitUrl, scriptPath, label }),
+    }),
+  updateScmJob: (name: string, gitUrl: string, scriptPath: string, label: string) =>
+    req<ScmJob>(`/api/scm/jobs/${name}`, {
+      method: "PUT",
+      body: JSON.stringify({ gitUrl, scriptPath, label }),
     }),
   deleteScmJob: (name: string) =>
     req<{ name: string }>(`/api/scm/jobs/${name}`, { method: "DELETE" }),
@@ -271,4 +302,23 @@ export const api = {
   runtime: () => req<Container[] | null>("/api/runtime"),
   tables: () => req<DbTable[] | null>("/api/db/tables"),
   table: (name: string) => req<TableDetail>(`/api/db/tables/${name}`),
+  tlbSites: () => req<{ sites: TlbSite[] | null; zone: string }>("/api/tlb/sites"),
+  tlbSite: (name: string) => req<TlbSiteDetail>("/api/tlb/sites/" + name),
+  createTlbSite: (name: string) =>
+    req<TlbSite>("/api/tlb/sites", { method: "POST", body: JSON.stringify({ name }) }),
+  deleteTlbSite: (name: string) =>
+    req<{ name: string }>("/api/tlb/sites/" + name, { method: "DELETE" }),
+  createTlbRoute: (site: string, name: string, path: string, target: string) =>
+    req<TlbRoute>("/api/tlb/sites/" + site + "/routes", {
+      method: "POST",
+      body: JSON.stringify({ name, path, target }),
+    }),
+  updateTlbRoute: (site: string, id: number, name: string, path: string, target: string) =>
+    req<TlbRoute>("/api/tlb/sites/" + site + "/routes/" + id, {
+      method: "PUT",
+      body: JSON.stringify({ name, path, target }),
+    }),
+  deleteTlbRoute: (site: string, id: number) =>
+    req<{ id: number }>("/api/tlb/sites/" + site + "/routes/" + id, { method: "DELETE" }),
+  publishTlb: () => req<{ status: string; sites: number; routes: number }>("/api/tlb/publish", { method: "POST" }),
 };

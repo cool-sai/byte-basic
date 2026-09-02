@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Button, Card, Message, Select, Space, Table, Tag, Typography } from "@arco-design/web-react";
+import { Button, Card, Message, Select, Table, Tag, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, errMsg, type Build, type Container, type DeployRecord } from "../../api";
+import LabelIcon from "../scm/LabelIcon";
 import LogBox from "../scm/LogBox";
 import Crumbs from "./Crumbs";
 
@@ -52,22 +53,27 @@ export default function AppPage() {
   );
 
   return (
-    <Space direction="vertical" size="large" className="w-full">
+    <div className="flex w-full flex-col gap-6">
       <Crumbs appName={name} />
       <div className="flex items-start justify-between gap-3">
         <div>
-          <Typography.Title heading={4} className="!mb-1">
+          <Typography.Title heading={4} className="!mb-1 inline-flex items-center gap-2">
+            <LabelIcon label={app?.label} />
             {app?.name || name}
           </Typography.Title>
           <div className="text-xs text-slate-500">
             SCM {app?.scmName ? <Link to={"/scm/" + app.scmName}>{app.scmName}</Link> : "—"}
+            {app?.label ? " · " + app.label : ""}
           </div>
           <div className="text-xs text-slate-500">Compose {compose.join(", ")}</div>
+          {app?.label === "node" ? (
+            <div className="text-xs text-slate-500">静态站 :80。发完后 TLB 把路径转到 {(compose[0] || name) + ":80"}。</div>
+          ) : null}
         </div>
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
 
-      <Space>
+      <div className="flex items-center gap-2">
         <Select
           value={version}
           onChange={setVersion}
@@ -84,7 +90,7 @@ export default function AppPage() {
         <Button type="primary" loading={busy} disabled={!version || busy} onClick={() => deploy(version)}>
           打镜像并启动
         </Button>
-      </Space>
+      </div>
       {picked ? (
         <Typography.Text type="secondary" className="font-mono text-xs">
           {picked.binPath}
@@ -130,6 +136,6 @@ export default function AppPage() {
           { title: "时间", dataIndex: "createdAt" },
         ]}
       />
-    </Space>
+    </div>
   );
 }

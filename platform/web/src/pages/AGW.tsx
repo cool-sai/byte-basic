@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Message, Select, Space, Table, Tag, Typography } from "@arco-design/web-react";
+import { Button, Message, Select, Table, Tag, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { api, errMsg, type IdlMethod, type Publish } from "../api";
 
@@ -26,7 +26,7 @@ export default function AGW() {
   const { run: publish, loading: busy } = useRequest((idl: string) => api.publish(idl), {
     manual: true,
     onSuccess: (_d, [idl]) => {
-      Message.success("已发布 " + idl + "，gateway 已重启加载 IDL。HTTP 口：18080");
+      Message.success("已发布 " + idl + "，sidecar 已重启。对外走 TLB :80，直连 sidecar 仍是 :18080");
       void refresh();
     },
     onError: (e) => Message.error(errMsg(e)),
@@ -40,15 +40,17 @@ export default function AGW() {
   const sampleUri = live.find((m) => m.uri)?.uri || "";
 
   return (
-    <Space direction="vertical" size="medium" className="w-full">
+    <div className="flex w-full flex-col gap-4">
       <div>
         <Typography.Title heading={4} className="!mb-1">
           AGW 网关
         </Typography.Title>
-        <Typography.Text type="secondary">从 BAM 拉 IDL，把带 agw.uri 的方法开通成 HTTP。发布 = 重启 gateway 读挂载的 thrift。</Typography.Text>
+        <Typography.Text type="secondary">
+          分布式 AGW：sidecar 和业务共用网络，HTTP 打到实例再本机转 RPC。对外入口是 TLB，发布 = 重启 sidecar 读 thrift。
+        </Typography.Text>
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
-      <Space>
+      <div className="flex items-center gap-2">
         <Select value={selected} onChange={setName} style={{ width: 220 }} loading={loading}>
           {idls.map((x) => (
             <Select.Option key={x.name} value={x.name}>
@@ -59,7 +61,7 @@ export default function AGW() {
         <Button type="primary" loading={busy} onClick={() => publish(selected)}>
           发布到网关
         </Button>
-      </Space>
+      </div>
 
       <Typography.Title heading={5}>BAM 里待发布的 HTTP</Typography.Title>
       <Table
@@ -115,9 +117,9 @@ export default function AGW() {
       />
       {sampleUri ? (
         <Typography.Text type="secondary" className="font-mono">
-          {`curl -s -d '{"id":1001}' -H 'Content-Type: application/json' http://127.0.0.1:18080${sampleUri}`}
+          {`curl -s -d '{"id":1001}' -H 'Content-Type: application/json' http://127.0.0.1${sampleUri}`}
         </Typography.Text>
       ) : null}
-    </Space>
+    </div>
   );
 }
