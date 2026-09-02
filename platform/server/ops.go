@@ -17,6 +17,7 @@ import (
 var jobName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type scmJob struct {
+	ID         int64
 	Name       string
 	GitURL     string
 	ScriptPath string
@@ -74,11 +75,20 @@ func (s *server) createJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"name": name, "gitUrl": gitURL, "scriptPath": scriptPath})
 }
 
+func (s *server) showJob(w http.ResponseWriter, r *http.Request) {
+	j, err := s.getJob(r.PathValue("name"))
+	if err != nil {
+		fail(w, 404, err)
+		return
+	}
+	writeJSON(w, map[string]any{"id": j.ID, "name": j.Name, "gitUrl": j.GitURL, "scriptPath": j.ScriptPath})
+}
+
 func (s *server) getJob(name string) (scmJob, error) {
 	var j scmJob
 	err := s.db.QueryRow(
-		`SELECT name, repo_dir, script_path FROM scm_job WHERE name=?`, name,
-	).Scan(&j.Name, &j.GitURL, &j.ScriptPath)
+		`SELECT id, name, repo_dir, script_path FROM scm_job WHERE name=?`, name,
+	).Scan(&j.ID, &j.Name, &j.GitURL, &j.ScriptPath)
 	if err == sql.ErrNoRows {
 		return j, fmt.Errorf("unknown scm %s", name)
 	}

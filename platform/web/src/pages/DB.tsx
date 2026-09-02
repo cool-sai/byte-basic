@@ -1,40 +1,33 @@
 import { useEffect, useState } from "react";
 import { Space, Table, Typography } from "@arco-design/web-react";
-import { api, errMsg, type DbTable, type TableDetail } from "../api";
+import { useRequest } from "ahooks";
+import { api, errMsg, type DbTable } from "../api";
 
 export default function DB() {
-  const [tables, setTables] = useState<DbTable[]>([]);
   const [cur, setCur] = useState("");
-  const [detail, setDetail] = useState<TableDetail | null>(null);
-  const [err, setErr] = useState("");
 
-  async function load() {
-    setErr("");
-    const list = (await api.tables()) || [];
-    setTables(list);
-    const pick = cur && list.find((t) => t.name === cur) ? cur : list[0]?.name;
-    if (pick) {
-      setCur(pick);
-      setDetail(await api.table(pick));
-    }
-  }
+  const {
+    data: tables = [],
+    loading: tablesLoading,
+    error: tablesErr,
+  } = useRequest(async () => (await api.tables()) || []);
+
   useEffect(() => {
-    load().catch((e) => setErr(errMsg(e)));
-  }, []);
-
-  async function open(name: string) {
-    setCur(name);
-    setErr("");
-    try {
-      setDetail(await api.table(name));
-    } catch (e) {
-      setErr(errMsg(e));
+    if (!cur && tables[0]) {
+      setCur(tables[0].name);
     }
-  }
+  }, [tables, cur]);
+
+  const {
+    data: detail,
+    loading: detailLoading,
+    error: detailErr,
+  } = useRequest(() => api.table(cur), { ready: !!cur, refreshDeps: [cur] });
 
   const cols = detail?.columns || [];
   const preview = (detail?.preview || []).map((row, i) => ({ ...row, _i: i }));
   const keys = preview[0] ? Object.keys(preview[0]).filter((k) => k !== "_i") : [];
+  const err = tablesErr || detailErr;
 
   return (
     <Space direction="vertical" size="medium" className="w-full">
@@ -46,14 +39,15 @@ export default function DB() {
           看 compose 里 minikitex 库的表结构和前 20 行。更完整的客户端用 DBeaver / Sequel Ace 连 127.0.0.1:3306。
         </Typography.Text>
       </div>
-      {err && <Typography.Text type="error">{err}</Typography.Text>}
+      {err ? <Typography.Text type="error">{errMsg(err)}</Typography.Text> : null}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_1fr]">
         <Table
           rowKey="name"
           pagination={false}
+          loading={tablesLoading}
           data={tables}
-          onRow={(t) => ({
-            onClick: () => void open(t.name),
+          onRow={(t: DbTable) => ({
+            onClick: () => setCur(t.name),
             className: t.name === cur ? "bg-cyan-50" : "cursor-pointer",
           })}
           columns={[
@@ -66,6 +60,7 @@ export default function DB() {
           <Table
             rowKey="name"
             pagination={false}
+            loading={detailLoading}
             data={cols}
             columns={[
               { title: "列", dataIndex: "name" },
@@ -79,6 +74,7 @@ export default function DB() {
           <Table
             rowKey="_i"
             pagination={false}
+            loading={detailLoading}
             data={preview}
             noDataElement="没有数据"
             columns={keys.map((k) => ({

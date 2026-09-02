@@ -53,6 +53,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/services", s.getServices)
 	mux.HandleFunc("GET /api/scm/jobs", s.listJobs)
+	mux.HandleFunc("GET /api/scm/jobs/{name}", s.showJob)
 	mux.HandleFunc("POST /api/scm/jobs", s.createJob)
 	mux.HandleFunc("GET /api/scm/builds", s.listBuilds)
 	mux.HandleFunc("GET /api/scm/builds/{id}", s.getBuild)

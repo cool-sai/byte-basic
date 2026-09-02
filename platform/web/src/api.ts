@@ -198,6 +198,7 @@ export { errMsg };
 export const api = {
   services: () => req<Service[]>("/api/services"),
   scmJobs: () => req<ScmJobs>("/api/scm/jobs"),
+  scmJob: (name: string) => req<ScmJob>(`/api/scm/jobs/${name}`),
   createScmJob: (name: string, gitUrl: string, scriptPath: string) =>
     req<ScmJob>("/api/scm/jobs", {
       method: "POST",

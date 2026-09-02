@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button, Message, Select, Space, Table, Tag, Typography } from "@arco-design/web-react";
-import { api, errMsg, type IdlMethod, type IdlView, type Publish } from "../api";
+import { useRequest } from "ahooks";
+import { api, errMsg, type IdlMethod, type Publish } from "../api";
 
 function parseRoutes(s: string): IdlMethod[] {
   try {
@@ -12,40 +13,29 @@ function parseRoutes(s: string): IdlMethod[] {
 }
 
 export default function AGW() {
-  const [idls, setIdls] = useState<IdlView[]>([]);
   const [name, setName] = useState("order");
-  const [pubs, setPubs] = useState<Publish[]>([]);
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
 
-  async function load() {
-    setErr("");
-    const list = (await api.idls()) || [];
-    setIdls(list);
-    if (list.length && !list.find((x) => x.name === name)) setName(list[0].name);
-    setPubs((await api.publishes()) || []);
-  }
-  useEffect(() => {
-    load().catch((e) => setErr(errMsg(e)));
-  }, []);
+  const { data, loading, error, refresh } = useRequest(async () => {
+    const idls = (await api.idls()) || [];
+    const pubs = (await api.publishes()) || [];
+    return { idls, pubs };
+  });
+  const idls = data?.idls || [];
+  const pubs = data?.pubs || [];
 
-  async function publish() {
-    setBusy(true);
-    setErr("");
-    try {
-      await api.publish(name);
-      Message.success("已发布 " + name + "，gateway 已重启加载 IDL。HTTP 口：18080");
-      await load();
-    } catch (e) {
-      setErr(errMsg(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const { run: publish, loading: busy } = useRequest((idl: string) => api.publish(idl), {
+    manual: true,
+    onSuccess: (_d, [idl]) => {
+      Message.success("已发布 " + idl + "，gateway 已重启加载 IDL。HTTP 口：18080");
+      void refresh();
+    },
+    onError: (e) => Message.error(errMsg(e)),
+  });
 
+  const cur = idls.find((x) => x.name === name) || idls[0];
+  const selected = cur?.name || name;
   const latest = pubs[0];
   const live = latest ? parseRoutes(latest.routesJson) : [];
-  const cur = idls.find((x) => x.name === name);
   const draftHttp = (cur?.methods || []).filter((m) => m.uri);
   const sampleUri = live.find((m) => m.uri)?.uri || "";
 
@@ -57,16 +47,16 @@ export default function AGW() {
         </Typography.Title>
         <Typography.Text type="secondary">从 BAM 拉 IDL，把带 agw.uri 的方法开通成 HTTP。发布 = 重启 gateway 读挂载的 thrift。</Typography.Text>
       </div>
-      {err && <Typography.Text type="error">{err}</Typography.Text>}
+      {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
       <Space>
-        <Select value={name} onChange={setName} style={{ width: 220 }}>
+        <Select value={selected} onChange={setName} style={{ width: 220 }} loading={loading}>
           {idls.map((x) => (
             <Select.Option key={x.name} value={x.name}>
               {x.name}.thrift
             </Select.Option>
           ))}
         </Select>
-        <Button type="primary" loading={busy} onClick={() => void publish()}>
+        <Button type="primary" loading={busy} onClick={() => publish(selected)}>
           发布到网关
         </Button>
       </Space>
@@ -75,6 +65,7 @@ export default function AGW() {
       <Table
         rowKey="name"
         pagination={false}
+        loading={loading}
         data={draftHttp}
         noDataElement="这份 IDL 没有 agw.uri，发布后也不会开通 HTTP。"
         columns={[
@@ -102,6 +93,7 @@ export default function AGW() {
       <Table
         rowKey="id"
         pagination={false}
+        loading={loading}
         data={pubs}
         columns={[
           { title: "IDL", dataIndex: "idlName" },

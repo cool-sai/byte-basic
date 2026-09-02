@@ -1,46 +1,41 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button, Message, Select, Space, Table, Tag, Typography } from "@arco-design/web-react";
-import { api, errMsg, type Build, type Container, type DeployRecord, type Service } from "../api";
+import { useRequest } from "ahooks";
+import { api, errMsg, type Container } from "../api";
 
 export default function Deploy() {
-  const [services, setServices] = useState<Service[]>([]);
   const [service, setService] = useState("gateway");
-  const [builds, setBuilds] = useState<Build[]>([]);
   const [version, setVersion] = useState("");
-  const [deploys, setDeploys] = useState<DeployRecord[]>([]);
-  const [runtime, setRuntime] = useState<Container[]>([]);
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
 
-  async function load(svc: string) {
-    setErr("");
-    const svcs = (await api.services()) || [];
-    setServices(svcs);
-    const b = (await api.builds(svc)) || [];
-    setBuilds(b);
-    const okBuilds = b.filter((x) => x.status === "ok");
-    setVersion((v) => (okBuilds.find((x) => x.version === v) ? v : okBuilds[0]?.version || ""));
-    setDeploys((await api.deploys(svc)) || []);
-    setRuntime((await api.runtime()) || []);
-  }
-  useEffect(() => {
-    load(service).catch((e) => setErr(errMsg(e)));
-  }, [service]);
+  const { data, loading, error, refresh } = useRequest(
+    async () => {
+      const services = (await api.services()) || [];
+      const builds = (await api.builds(service)) || [];
+      const deploys = (await api.deploys(service)) || [];
+      const runtime = (await api.runtime()) || [];
+      return { services, builds, deploys, runtime };
+    },
+    {
+      refreshDeps: [service],
+      onSuccess: (d) => {
+        const okBuilds = d.builds.filter((x) => x.status === "ok");
+        setVersion((v) => (okBuilds.find((x) => x.version === v) ? v : okBuilds[0]?.version || ""));
+      },
+    },
+  );
+  const services = data?.services || [];
+  const builds = data?.builds || [];
+  const deploys = data?.deploys || [];
+  const runtime = data?.runtime || [];
 
-  async function deploy() {
-    if (!version) return;
-    setBusy(true);
-    setErr("");
-    try {
-      await api.deploy(service, version);
-      Message.success("已部署 " + service + " @ " + version);
-      await load(service);
-    } catch (e) {
-      setErr(errMsg(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const { run: deploy, loading: busy } = useRequest((svc: string, ver: string) => api.deploy(svc, ver), {
+    manual: true,
+    onSuccess: (_d, [svc, ver]) => {
+      Message.success("已部署 " + svc + " @ " + ver);
+      void refresh();
+    },
+    onError: (e) => Message.error(errMsg(e)),
+  });
 
   return (
     <Space direction="vertical" size="medium" className="w-full">
@@ -50,16 +45,16 @@ export default function Deploy() {
         </Typography.Title>
         <Typography.Text type="secondary">选 SCM 版本，把制品拷到 bin/ 再 compose build + up --no-deps。只动这一个服务。</Typography.Text>
       </div>
-      {err && <Typography.Text type="error">{err}</Typography.Text>}
+      {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
       <Space>
-        <Select value={service} onChange={setService} style={{ width: 160 }}>
+        <Select value={service} onChange={setService} style={{ width: 160 }} loading={loading}>
           {services.map((s) => (
             <Select.Option key={s.name} value={s.name}>
               {s.name}
             </Select.Option>
           ))}
         </Select>
-        <Select value={version} onChange={setVersion} style={{ width: 220 }}>
+        <Select value={version} onChange={setVersion} style={{ width: 220 }} loading={loading}>
           {builds
             .filter((b) => b.status === "ok")
             .map((b) => (
@@ -68,7 +63,7 @@ export default function Deploy() {
               </Select.Option>
             ))}
         </Select>
-        <Button type="primary" loading={busy} disabled={!version} onClick={() => void deploy()}>
+        <Button type="primary" loading={busy} disabled={!version} onClick={() => deploy(service, version)}>
           构建并部署
         </Button>
       </Space>
@@ -77,6 +72,7 @@ export default function Deploy() {
       <Table
         rowKey={(c) => c.ID || c.Name || ""}
         pagination={false}
+        loading={loading}
         data={runtime}
         columns={[
           { title: "容器", render: (_: unknown, c: Container) => c.Name || c.Service },
@@ -89,6 +85,7 @@ export default function Deploy() {
       <Table
         rowKey="id"
         pagination={false}
+        loading={loading}
         data={deploys}
         columns={[
           { title: "服务", dataIndex: "service" },
