@@ -55,6 +55,7 @@ func main() {
 	mux.HandleFunc("GET /api/scm/jobs", s.listJobs)
 	mux.HandleFunc("POST /api/scm/jobs", s.createJob)
 	mux.HandleFunc("GET /api/scm/builds", s.listBuilds)
+	mux.HandleFunc("GET /api/scm/builds/{id}", s.getBuild)
 	mux.HandleFunc("POST /api/scm/builds", s.createBuild)
 	mux.HandleFunc("GET /api/bam/idls", s.listIDLs)
 	mux.HandleFunc("GET /api/bam/idls/{name}", s.getIDL)
@@ -67,9 +68,27 @@ func main() {
 	mux.HandleFunc("GET /api/db/tables", s.listTables)
 	mux.HandleFunc("GET /api/db/tables/{name}", s.getTable)
 
+	if web := getenv("WEB_DIR", ""); web != "" {
+		mux.Handle("/", spa(web))
+	}
+
 	addr := getenv("LISTEN", "127.0.0.1:8081")
-	log.Println("platform", addr, "root", root)
+	log.Println("platform", addr, "root", root, "web", getenv("WEB_DIR", ""))
 	log.Fatal(http.ListenAndServe(addr, cors(mux)))
+}
+
+func spa(dir string) http.Handler {
+	fs := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
+		p := filepath.Join(dir, rel)
+		st, err := os.Stat(p)
+		if err != nil || st.IsDir() {
+			http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+			return
+		}
+		fs.ServeHTTP(w, r)
+	})
 }
 
 func waitDB(dsn string) (*sql.DB, error) {

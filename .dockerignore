@@ -1,10 +1,6 @@
+bin
+artifacts
+scm-work
+platform/web/node_modules
+platform/web/dist
 .git
-docs
-observability
-bin/.gitkeep
-example/py
-example/js
-example/generic
-example/client
-*_test.go
-**/*_test.go

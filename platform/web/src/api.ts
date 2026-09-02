@@ -205,6 +205,7 @@ export const api = {
     }),
   builds: (service?: string) =>
     req<Build[] | null>("/api/scm/builds" + (service ? `?service=${service}` : "")),
+  buildDetail: (id: number) => req<Build>(`/api/scm/builds/${id}`),
   build: (name: string, onLog: (text: string) => void) =>
     streamBuild(name, onLog),
   idls: () => req<IdlView[]>("/api/bam/idls"),

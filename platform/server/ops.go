@@ -204,6 +204,28 @@ func (s *server) listBuilds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, scanRows(rows, "id", "service", "version", "binPath", "status", "log", "createdAt"))
 }
 
+func (s *server) getBuild(w http.ResponseWriter, r *http.Request) {
+	var id int64
+	var service, version, binPath, status, logText string
+	var created time.Time
+	err := s.db.QueryRow(
+		`SELECT id, service, version, bin_path, status, log_text, created_at FROM scm_build WHERE id=?`,
+		r.PathValue("id"),
+	).Scan(&id, &service, &version, &binPath, &status, &logText, &created)
+	if err == sql.ErrNoRows {
+		fail(w, 404, fmt.Errorf("build not found"))
+		return
+	}
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"id": id, "service": service, "version": version, "binPath": binPath,
+		"status": status, "log": logText, "createdAt": created.Format(time.RFC3339),
+	})
+}
+
 func (s *server) createBuild(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
