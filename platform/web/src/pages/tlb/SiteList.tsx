@@ -98,8 +98,8 @@ export default function SiteList() {
                 </Button>
               }
             >
-              <div className="text-xs text-slate-500">三级域名 {s.name}</div>
-              <div className="text-xs text-slate-500">路由 {s.routes} 条</div>
+              <div className="meta">三级域名 {s.name}</div>
+              <div className="meta">路由 {s.routes} 条</div>
             </Card>
           ))}
         </div>

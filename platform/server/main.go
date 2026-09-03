@@ -85,6 +85,8 @@ func main() {
 	mux.HandleFunc("PUT /api/tlb/sites/{name}/routes/{id}", s.updateTlbRoute)
 	mux.HandleFunc("DELETE /api/tlb/sites/{name}/routes/{id}", s.deleteTlbRoute)
 	mux.HandleFunc("POST /api/tlb/publish", s.publishTlb)
+	mux.HandleFunc("POST /api/login", s.login)
+	mux.HandleFunc("GET /api/me", s.me)
 
 	if web := getenv("WEB_DIR", ""); web != "" {
 		mux.Handle("/", spa(web))
@@ -92,7 +94,7 @@ func main() {
 
 	addr := getenv("LISTEN", "127.0.0.1:8081")
 	log.Println("platform", addr, "root", root, "web", getenv("WEB_DIR", ""))
-	log.Fatal(http.ListenAndServe(addr, cors(mux)))
+	log.Fatal(http.ListenAndServe(addr, cors(s.auth(mux))))
 }
 
 func spa(dir string) http.Handler {
@@ -202,6 +204,9 @@ func migrate(db *sql.DB) error {
 		if _, err := db.Exec(q); err != nil && !skipAlter(err) {
 			return err
 		}
+	}
+	if err := seedAdmin(db); err != nil {
+		return err
 	}
 	return seedTlb(db)
 }
@@ -348,7 +353,7 @@ func fieldsOf(st *idl.Struct) []map[string]any {
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(204)

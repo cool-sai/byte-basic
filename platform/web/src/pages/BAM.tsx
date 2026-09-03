@@ -105,7 +105,7 @@ export default function BAM() {
                   render: (_: unknown, m: (typeof methods)[0]) => (
                     <div>
                       <b>{m.req}</b>
-                      <div className="text-slate-500">{fieldList(m.reqFields)}</div>
+                      <div className="meta">{fieldList(m.reqFields)}</div>
                     </div>
                   ),
                 },
@@ -114,7 +114,7 @@ export default function BAM() {
                   render: (_: unknown, m: (typeof methods)[0]) => (
                     <div>
                       <b>{m.resp}</b>
-                      <div className="text-slate-500">{fieldList(m.respFields)}</div>
+                      <div className="meta">{fieldList(m.respFields)}</div>
                     </div>
                   ),
                 },

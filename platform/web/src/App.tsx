@@ -1,5 +1,6 @@
-import { Layout, Menu, Typography } from "@arco-design/web-react";
+import { Button } from "@arco-design/web-react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import Login from "./pages/Login";
 import SCM from "./pages/SCM";
 import JobList from "./pages/scm/JobList";
 import JobPage from "./pages/scm/JobPage";
@@ -16,34 +17,63 @@ import RunPage from "./pages/deploy/RunPage";
 import DB from "./pages/DB";
 
 const TABS = [
-  ["scm", "SCM 编译"],
-  ["bam", "BAM IDL"],
-  ["agw", "AGW 网关"],
-  ["tlb", "TLB"],
-  ["deploy", "部署"],
-  ["db", "MySQL"],
+  ["scm", "01", "SCM"],
+  ["bam", "02", "BAM"],
+  ["agw", "03", "AGW"],
+  ["tlb", "04", "TLB"],
+  ["deploy", "05", "Deploy"],
+  ["db", "06", "MySQL"],
 ] as const;
 
 export default function App() {
   const loc = useLocation();
   const navigate = useNavigate();
   const tab = loc.pathname.split("/")[1] || "scm";
+  const token = localStorage.getItem("token");
+  if (loc.pathname === "/login") {
+    if (token) {
+      return <Navigate to="/scm" replace />;
+    }
+    return <Login />;
+  }
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+  const user = localStorage.getItem("user") || "";
   return (
-    <Layout className="h-screen">
-      <Layout.Sider theme="dark" width={220}>
-        <div className="px-4 py-4 text-white">
-          <Typography.Title heading={5} className="!mb-0 !text-white">
-            minikitex
-          </Typography.Title>
-          <Typography.Text className="text-xs text-white/55">SCM · BAM · AGW · TLB · 部署</Typography.Text>
+    <div className="shell">
+      <aside className="rail">
+        <div className="brand">
+          <div className="mark" />
+          <div>
+            <h1>minikitex</h1>
+            <p>control plane</p>
+          </div>
         </div>
-        <Menu theme="dark" selectedKeys={[tab]} onClickMenuItem={(key) => navigate("/" + key)}>
-          {TABS.map(([id, label]) => (
-            <Menu.Item key={id}>{label}</Menu.Item>
+        <nav className="nav">
+          {TABS.map(([id, idx, label]) => (
+            <button key={id} className={tab === id ? "on" : ""} onClick={() => navigate("/" + id)}>
+              <span className="idx">{idx}</span>
+              {label}
+            </button>
           ))}
-        </Menu>
-      </Layout.Sider>
-      <Layout.Content className="overflow-auto bg-slate-50 p-6">
+        </nav>
+        <div className="rail-foot">
+          <div className="who">{user}</div>
+          <Button
+            size="mini"
+            long
+            onClick={() => {
+              localStorage.removeItem("token");
+              localStorage.removeItem("user");
+              navigate("/login", { replace: true });
+            }}
+          >
+            退出
+          </Button>
+        </div>
+      </aside>
+      <main className="stage">
         <Routes>
           <Route path="/" element={<Navigate to="/scm" replace />} />
           <Route path="/scm" element={<SCM />}>
@@ -64,7 +94,7 @@ export default function App() {
           </Route>
           <Route path="/db" element={<DB />} />
         </Routes>
-      </Layout.Content>
-    </Layout>
+      </main>
+    </div>
   );
 }

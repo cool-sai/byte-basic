@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input, Message, Modal, Select, Table, Typography } from "@arco-design/web-react";
+import { AutoComplete, Button, Input, Message, Modal, Table, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { useLocation, useParams } from "react-router-dom";
 import { api, errMsg, type TlbRoute } from "../../api";
@@ -21,9 +21,6 @@ export default function SitePage() {
   const routes = data?.routes || [];
   const host = data?.host || name + ".ls-byte-basic.com";
   const upstreams = upData?.upstreams || [];
-  const targetOpts = target && !upstreams.some((u) => u.target === target)
-    ? [{ name: target, target }, ...upstreams]
-    : upstreams;
 
   const { runAsync: save, loading: saving } = useRequest(
     (n: string, p: string, t: string, row: TlbRoute | null) =>
@@ -143,19 +140,14 @@ export default function SitePage() {
         <div className="flex w-full flex-col gap-4">
           <Input addBefore="名称" value={routeName} onChange={setRouteName} placeholder="agent-web" />
           <Input addBefore="路径" value={path} onChange={setPath} placeholder="/" />
-          <Select
+          <AutoComplete
             className="w-full"
-            value={target || undefined}
+            data={upstreams.map((u) => u.target)}
+            value={target}
             onChange={setTarget}
-            placeholder="选择服务"
-            showSearch
-          >
-            {targetOpts.map((u) => (
-              <Select.Option key={u.target} value={u.target}>
-                {u.name}
-              </Select.Option>
-            ))}
-          </Select>
+            placeholder="host:port，例如 platform:8081 或 192.168.5.2:5173"
+            triggerElement={<Input addBefore="转到" />}
+          />
         </div>
       </Modal>
     </div>

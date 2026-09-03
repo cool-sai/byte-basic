@@ -87,16 +87,16 @@ export default function AppPage() {
             <LabelIcon label={app?.label} />
             {app?.name || name}
           </Typography.Title>
-          <div className="text-xs text-slate-500">
+          <div className="meta">
             SCM {app?.scmName ? <Link to={"/scm/" + app.scmName}>{app.scmName}</Link> : "—"}
             {app?.label ? " · " + app.label : ""}
           </div>
-          <div className="text-xs text-slate-500">Compose {compose.join(", ")}</div>
+          <div className="meta">Compose {compose.join(", ")}</div>
           {app?.label === "node" ? (
-            <div className="text-xs text-slate-500">静态站 :80。发完后 TLB 把路径转到 {(compose[0] || name) + ":80"}。</div>
+            <div className="meta">静态站 :80。发完后 TLB 把路径转到 {(compose[0] || name) + ":80"}。</div>
           ) : null}
           {app?.label === "python" ? (
-            <div className="text-xs text-slate-500">Flask :80。发完后 TLB 把路径转到 {(compose[0] || name) + ":80"}。</div>
+            <div className="meta">Flask :80。发完后 TLB 把路径转到 {(compose[0] || name) + ":80"}。</div>
           ) : null}
         </div>
         <Button

@@ -159,11 +159,32 @@ export type TableDetail = {
   preview: Record<string, unknown>[];
 };
 
+function authHeaders(extra?: HeadersInit): HeadersInit {
+  const token = localStorage.getItem("token") || "";
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: "Bearer " + token } : {}),
+    ...(extra as Record<string, string> | undefined),
+  };
+}
+
+function dropSession() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+  if (window.location.pathname !== "/login") {
+    window.location.assign("/login");
+  }
+}
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const { headers: extra, ...rest } = opts;
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
-    ...opts,
+    ...rest,
+    headers: authHeaders(extra),
   });
+  if (res.status === 401 && path !== "/api/login") {
+    dropSession();
+  }
   const text = await res.text();
   let data: unknown = null;
   try {
@@ -248,9 +269,12 @@ async function readSSE(res: Response, onLog: (text: string) => void): Promise<Bu
 async function streamSSE(path: string, body: unknown, onLog: (text: string) => void): Promise<BuildResult> {
   const res = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify(body),
   });
+  if (res.status === 401) {
+    dropSession();
+  }
   return readSSE(res, onLog);
 }
 
@@ -282,7 +306,17 @@ export const api = {
       body: JSON.stringify({ name, branch }),
     }),
   watchBuild: (id: number, onLog: (text: string) => void) =>
-    fetch("/api/scm/builds/" + id + "/stream").then((res) => readSSE(res, onLog)),
+    fetch("/api/scm/builds/" + id + "/stream", { headers: authHeaders() }).then((res) => {
+      if (res.status === 401) {
+        dropSession();
+      }
+      return readSSE(res, onLog);
+    }),
+  login: (name: string, password: string) =>
+    req<{ token: string; name: string }>("/api/login", {
+      method: "POST",
+      body: JSON.stringify({ name, password }),
+    }),
   idls: () => req<IdlView[]>("/api/bam/idls"),
   idl: (name: string) => req<IdlView>(`/api/bam/idls/${name}`),
   saveIdl: (name: string, content: string) =>

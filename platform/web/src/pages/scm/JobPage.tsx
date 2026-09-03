@@ -63,8 +63,8 @@ export default function JobPage() {
             <LabelIcon label={job?.label} />
             {job?.name || name}
           </Typography.Title>
-          <div className="text-xs text-slate-500">Git {job?.gitUrl}</div>
-          <div className="text-xs text-slate-500">脚本 {job?.scriptPath}</div>
+          <div className="meta">Git {job?.gitUrl}</div>
+          <div className="meta">脚本 {job?.scriptPath}</div>
         </div>
         <div className="flex items-center gap-2">
           <Button disabled={!job} onClick={() => setEditOpen(true)}>

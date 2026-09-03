@@ -83,8 +83,8 @@ export default function AppList() {
               className="cursor-pointer"
               onClick={() => navigate("/deploy/" + a.name)}
             >
-              <div className="text-xs text-slate-500">SCM {a.scmName}</div>
-              <div className="text-xs text-slate-500">Compose {(a.compose || []).join(", ")}</div>
+              <div className="meta">SCM {a.scmName}</div>
+              <div className="meta">Compose {(a.compose || []).join(", ")}</div>
             </Card>
           ))}
         </div>

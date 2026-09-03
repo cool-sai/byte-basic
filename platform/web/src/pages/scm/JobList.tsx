@@ -112,8 +112,8 @@ export default function JobList() {
                 </div>
               }
             >
-              <div className="text-xs text-slate-500">Git {j.gitUrl}</div>
-              <div className="text-xs text-slate-500">脚本 {j.scriptPath}</div>
+              <div className="meta">Git {j.gitUrl}</div>
+              <div className="meta">脚本 {j.scriptPath}</div>
             </Card>
           ))}
         </div>

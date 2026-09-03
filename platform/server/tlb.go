@@ -328,17 +328,10 @@ func (s *server) publishTlb(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	conf := renderTlbNginx(sites)
-	path := "/tlb-conf/nginx.conf"
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		fail(w, 500, err)
-		return
-	}
-	if err := os.WriteFile(path, []byte(conf), 0o644); err != nil {
-		fail(w, 500, err)
-		return
-	}
-	out, err := s.compose("exec", "-T", "tlb", "sh", "-c",
-		"nginx -t -c /generated/nginx.conf && cp /generated/nginx.conf /etc/nginx/nginx.conf && nginx -s reload")
+	cmd := s.composeCmd("exec", "-T", "tlb", "sh", "-c",
+		"cat > /generated/nginx.conf && nginx -t -c /generated/nginx.conf && cp /generated/nginx.conf /etc/nginx/nginx.conf && nginx -s reload")
+	cmd.Stdin = strings.NewReader(conf)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		fail(w, 500, fmt.Errorf("nginx: %w\n%s", err, out))
 		return
