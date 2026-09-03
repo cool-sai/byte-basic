@@ -45,46 +45,17 @@ services:
     depends_on:
       - etcd
 
-  user-1:
+  user:
     build:
       context: .
       args:
         BIN: user
     image: minikitex-user:local
-    hostname: user-1
+    scale: 2
     environment:
       LISTEN: "0.0.0.0:8888"
-      INSTANCE: user-1
       REGISTRY: "http://consul:8500"
       SERVICE_NAME: "user"
-      ADVERTISE: "user-1:8888"
-      PSM: "user"
-      METRICS: "0.0.0.0:9091"
-      JAEGER: "http://jaeger:9411/api/v2/spans"
-      CONFIG: "http://etcd:2379"
-    labels:
-      psm: user
-    expose:
-      - "8888"
-      - "9091"
-    depends_on:
-      - consul
-      - jaeger
-      - etcd
-
-  user-2:
-    build:
-      context: .
-      args:
-        BIN: user
-    image: minikitex-user:local
-    hostname: user-2
-    environment:
-      LISTEN: "0.0.0.0:8888"
-      INSTANCE: user-2
-      REGISTRY: "http://consul:8500"
-      SERVICE_NAME: "user"
-      ADVERTISE: "user-2:8888"
       PSM: "user"
       METRICS: "0.0.0.0:9091"
       JAEGER: "http://jaeger:9411/api/v2/spans"
@@ -123,8 +94,7 @@ services:
       - "9091"
     depends_on:
       - consul
-      - user-1
-      - user-2
+      - user
       - jaeger
 
   # 分布式 AGW：和 order 共用网络，HTTP 进这台实例，本机转 RPC。
@@ -172,6 +142,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.54.1
+    user: root
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=6h
@@ -179,9 +150,9 @@ services:
       - "9090:9090"
     volumes:
       - ${HOST_ROOT:-.}/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
-      - user-1
-      - user-2
+      - user
       - order
 
   platform:

@@ -3,16 +3,22 @@ global:
 
 scrape_configs:
   - job_name: rpc
-    static_configs:
-      - targets: ["user-1:9091"]
-        labels:
-          psm: user
-          instance: user-1
-      - targets: ["user-2:9091"]
-        labels:
-          psm: user
-          instance: user-2
-      - targets: ["order:9091"]
-        labels:
-          psm: order
-          instance: order-1
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        regex: golang
+        action: keep
+      - source_labels: [__meta_docker_port_private]
+        regex: "9091"
+        action: keep
+      - source_labels: [__meta_docker_container_label_psm]
+        target_label: psm
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service, __meta_docker_container_label_com_docker_compose_container_number]
+        separator: "-"
+        target_label: instance
+      - source_labels: [__meta_docker_network_ip]
+        regex: (.+)
+        replacement: $1:9091
+        target_label: __address__

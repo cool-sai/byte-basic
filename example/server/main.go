@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"time"
 
@@ -55,7 +56,7 @@ func announce(instance string) {
 	name := getenv("SERVICE_NAME", "user")
 	advertise := os.Getenv("ADVERTISE")
 	if advertise == "" {
-		advertise = instance + ":8888"
+		advertise = localAdvertise(instance, getenv("LISTEN", "127.0.0.1:8888"))
 	}
 	for {
 		if err := discovery.Register(base, name, advertise); err != nil {
@@ -63,6 +64,22 @@ func announce(instance string) {
 		}
 		time.Sleep(2 * time.Second)
 	}
+}
+
+func localAdvertise(instance, listen string) string {
+	port := "8888"
+	if _, p, err := net.SplitHostPort(listen); err == nil && p != "" {
+		port = p
+	}
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		in, ok := a.(*net.IPNet)
+		if !ok || in.IP.IsLoopback() || in.IP.To4() == nil {
+			continue
+		}
+		return net.JoinHostPort(in.IP.String(), port)
+	}
+	return instance + ":" + port
 }
 
 func getenv(k, def string) string {

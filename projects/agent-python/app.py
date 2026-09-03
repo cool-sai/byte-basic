@@ -1,6 +1,6 @@
 import os
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
@@ -12,6 +12,7 @@ def ok(data):
 @app.get("/api/hello")
 @app.get("/python/api/hello")
 def hello():
+    print(f"hello {request.method} {request.path}", flush=True)
     return ok({"service": "agent-python", "msg": "hello from agent-python"})
 
 

@@ -59,7 +59,8 @@ func Metrics(next HandlerFunc) HandlerFunc {
 		if err != nil {
 			status = "error"
 		}
-		observeRPC(infoFrom(ctx).method, status, time.Since(start))
+		rpcRequests.WithLabelValues(infoFrom(ctx).method, status).Inc()
+		rpcDuration.WithLabelValues(infoFrom(ctx).method).Observe(time.Since(start).Seconds())
 		return resp, err
 	}
 }

@@ -121,7 +121,7 @@ export default function AppList() {
               </Select.Option>
             ))}
           </Select>
-          <Input addBefore="Compose" value={compose} onChange={setCompose} placeholder="user-1,user-2" />
+          <Input addBefore="Compose" value={compose} onChange={setCompose} placeholder="user" />
           <Typography.Text type="secondary">Compose 不填时：目录里有同名服务就用它，否则用服务名自己起一份（node 静态站）。</Typography.Text>
         </div>
       </Modal>

@@ -21,7 +21,8 @@ scrape_configs:
         target_label: psm
       - source_labels: ['__meta_docker_container_label_psm']
         target_label: service
-      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service', '__meta_docker_container_label_com_docker_compose_container_number']
+        separator: '-'
         target_label: instance
       - source_labels: ['__meta_docker_container_name']
         regex: '/(.*)'

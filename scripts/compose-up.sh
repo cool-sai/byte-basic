@@ -13,7 +13,7 @@ aarch64|arm64) export GOARCH=arm64 ;;
 *) export GOARCH=amd64 ;;
 esac
 
-# 每个函数只编一次（user-1 / user-2 共用 bin/user）
+# 每个函数只编一次（user 多副本共用 bin/user）
 build_user() { [ -n "$built_user" ] && return; built_user=1; go build -o bin/user ./example/server; }
 build_order() { [ -n "$built_order" ] && return; built_order=1; go build -o bin/order ./example/order; }
 build_etcdui() { [ -n "$built_etcdui" ] && return; built_etcdui=1; go build -o bin/etcdui ./example/etcdui; }
@@ -36,7 +36,7 @@ if [ -z "$svcs" ]; then
 else
   for s in $svcs; do
     case "$s" in
-      user-1|user-2) build_user ;;
+      user) build_user ;;
       order) build_order ;;
       etcdui) build_etcdui ;;
       gateway) build_gateway ;;

@@ -21,7 +21,8 @@ func main() {
 		addr = "0.0.0.0:80"
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/hello", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/hello", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("hello %s %s", r.Method, r.URL.Path)
 		writeAPI(w, map[string]string{
 			"service": "agent-server",
 			"msg":     "hello from agent-server",

@@ -25,7 +25,7 @@ type Service struct {
 }
 
 var catalog = []Service{
-	{Name: "user", Bin: "user", Pkg: "./example/server", Compose: []string{"user-1", "user-2"}},
+	{Name: "user", Bin: "user", Pkg: "./example/server", Compose: []string{"user"}},
 	{Name: "order", Bin: "order", Pkg: "./example/order", Compose: []string{"order"}},
 	{Name: "gateway", Bin: "gateway", Pkg: "./example/gateway", Compose: []string{"gateway"}},
 	{Name: "etcdui", Bin: "etcdui", Pkg: "./example/etcdui", Compose: []string{"etcdui"}},
