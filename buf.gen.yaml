@@ -1,0 +1,15 @@
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: gen
+    opt:
+      - paths=source_relative
+  - local: protoc-gen-connect-go
+    out: gen
+    opt:
+      - paths=source_relative
+  - local: ["npx", "--prefix", "platform/web", "protoc-gen-es"]
+    out: platform/web/src/gen
+    opt:
+      - target=ts
+      - import_extension=none

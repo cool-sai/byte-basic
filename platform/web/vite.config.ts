@@ -15,6 +15,12 @@ export default defineConfig({
         timeout: 0,
         proxyTimeout: 0,
       },
+      "/platform.v1.PlatformService": {
+        target: "http://127.0.0.1:8081",
+        changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
+      },
     },
   },
 });

@@ -1,0 +1,455 @@
+syntax = "proto3";
+
+package platform.v1;
+
+option go_package = "minikitex/gen/platform/v1;platformv1";
+
+import "google/api/annotations.proto";
+
+service PlatformService {
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = { post: "/api/login" body: "*" };
+  }
+  rpc Me(MeRequest) returns (MeResponse) {
+    option (google.api.http) = { get: "/api/me" };
+  }
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse) {
+    option (google.api.http) = { get: "/api/services" };
+  }
+
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse) {
+    option (google.api.http) = { get: "/api/scm/jobs" };
+  }
+  rpc ShowJob(ShowJobRequest) returns (Job) {
+    option (google.api.http) = { get: "/api/scm/jobs/{name}" };
+  }
+  rpc ListBranches(ListBranchesRequest) returns (ListBranchesResponse) {
+    option (google.api.http) = { get: "/api/scm/jobs/{name}/branches" };
+  }
+  rpc CreateJob(CreateJobRequest) returns (Job) {
+    option (google.api.http) = { post: "/api/scm/jobs" body: "*" };
+  }
+  rpc UpdateJob(UpdateJobRequest) returns (Job) {
+    option (google.api.http) = { put: "/api/scm/jobs/{name}" body: "*" };
+  }
+  rpc DeleteJob(DeleteJobRequest) returns (DeleteJobResponse) {
+    option (google.api.http) = { delete: "/api/scm/jobs/{name}" };
+  }
+
+  rpc ListBuilds(ListBuildsRequest) returns (ListBuildsResponse) {
+    option (google.api.http) = { get: "/api/scm/builds" };
+  }
+  rpc GetBuild(GetBuildRequest) returns (Build) {
+    option (google.api.http) = { get: "/api/scm/builds/{id}" };
+  }
+  rpc WatchBuild(WatchBuildRequest) returns (stream RunEvent) {
+    option (google.api.http) = { get: "/api/scm/builds/{id}/stream" };
+  }
+  rpc CreateBuild(CreateBuildRequest) returns (Build) {
+    option (google.api.http) = { post: "/api/scm/builds" body: "*" };
+  }
+
+  rpc ListIdls(ListIdlsRequest) returns (ListIdlsResponse) {
+    option (google.api.http) = { get: "/api/bam/idls" };
+  }
+  rpc GetIdl(GetIdlRequest) returns (Idl) {
+    option (google.api.http) = { get: "/api/bam/idls/{name}" };
+  }
+  rpc SaveIdl(SaveIdlRequest) returns (Idl) {
+    option (google.api.http) = { put: "/api/bam/idls/{name}" body: "*" };
+  }
+  rpc ListPublishes(ListPublishesRequest) returns (ListPublishesResponse) {
+    option (google.api.http) = { get: "/api/agw/publishes" };
+  }
+  rpc PublishAgw(PublishAgwRequest) returns (PublishAgwResponse) {
+    option (google.api.http) = { post: "/api/agw/publish" body: "*" };
+  }
+
+  rpc ListApps(ListAppsRequest) returns (ListAppsResponse) {
+    option (google.api.http) = { get: "/api/deploy/apps" };
+  }
+  rpc ShowApp(ShowAppRequest) returns (App) {
+    option (google.api.http) = { get: "/api/deploy/apps/{name}" };
+  }
+  rpc CreateApp(CreateAppRequest) returns (App) {
+    option (google.api.http) = { post: "/api/deploy/apps" body: "*" };
+  }
+  rpc ListDeploys(ListDeploysRequest) returns (ListDeploysResponse) {
+    option (google.api.http) = { get: "/api/deploys" };
+  }
+  rpc GetDeploy(GetDeployRequest) returns (Deploy) {
+    option (google.api.http) = { get: "/api/deploys/{id}" };
+  }
+  rpc WatchDeploy(WatchDeployRequest) returns (stream RunEvent) {
+    option (google.api.http) = { get: "/api/deploys/{id}/stream" };
+  }
+  rpc CreateDeploy(CreateDeployRequest) returns (Deploy) {
+    option (google.api.http) = { post: "/api/deploys" body: "*" };
+  }
+  rpc Runtime(RuntimeRequest) returns (RuntimeResponse) {
+    option (google.api.http) = { get: "/api/runtime" };
+  }
+
+  rpc ListTables(ListTablesRequest) returns (ListTablesResponse) {
+    option (google.api.http) = { get: "/api/db/tables" };
+  }
+  rpc GetTable(GetTableRequest) returns (Table) {
+    option (google.api.http) = { get: "/api/db/tables/{name}" };
+  }
+
+  rpc ListTlbUpstreams(ListTlbUpstreamsRequest) returns (ListTlbUpstreamsResponse) {
+    option (google.api.http) = { get: "/api/tlb/upstreams" };
+  }
+  rpc ListTlbSites(ListTlbSitesRequest) returns (ListTlbSitesResponse) {
+    option (google.api.http) = { get: "/api/tlb/sites" };
+  }
+  rpc CreateTlbSite(CreateTlbSiteRequest) returns (TlbSite) {
+    option (google.api.http) = { post: "/api/tlb/sites" body: "*" };
+  }
+  rpc ShowTlbSite(ShowTlbSiteRequest) returns (TlbSiteDetail) {
+    option (google.api.http) = { get: "/api/tlb/sites/{name}" };
+  }
+  rpc DeleteTlbSite(DeleteTlbSiteRequest) returns (DeleteTlbSiteResponse) {
+    option (google.api.http) = { delete: "/api/tlb/sites/{name}" };
+  }
+  rpc CreateTlbRoute(CreateTlbRouteRequest) returns (TlbRoute) {
+    option (google.api.http) = { post: "/api/tlb/sites/{site}/routes" body: "*" };
+  }
+  rpc UpdateTlbRoute(UpdateTlbRouteRequest) returns (TlbRoute) {
+    option (google.api.http) = { put: "/api/tlb/sites/{site}/routes/{id}" body: "*" };
+  }
+  rpc DeleteTlbRoute(DeleteTlbRouteRequest) returns (DeleteTlbRouteResponse) {
+    option (google.api.http) = { delete: "/api/tlb/sites/{site}/routes/{id}" };
+  }
+  rpc PublishTlb(PublishTlbRequest) returns (PublishTlbResponse) {
+    option (google.api.http) = { post: "/api/tlb/publish" body: "*" };
+  }
+}
+
+message LoginRequest {
+  string name = 1;
+  string password = 2;
+}
+message LoginResponse {
+  string token = 1;
+  string name = 2;
+}
+message MeRequest {}
+message MeResponse {
+  string name = 1;
+}
+
+message Service {
+  string name = 1;
+  string bin = 2;
+  string pkg = 3;
+  repeated string compose = 4;
+}
+message ListServicesRequest {}
+message ListServicesResponse {
+  repeated Service services = 1;
+}
+
+message Job {
+  int64 id = 1;
+  string name = 2;
+  string git_url = 3;
+  string script_path = 4;
+  string branch = 5;
+  string label = 6;
+  string created_at = 7;
+}
+message ListJobsRequest {}
+message ListJobsResponse {
+  repeated Job jobs = 1;
+}
+message ShowJobRequest {
+  string name = 1;
+}
+message CreateJobRequest {
+  string name = 1;
+  string git_url = 2;
+  string script_path = 3;
+  string label = 4;
+}
+message UpdateJobRequest {
+  string name = 1;
+  string git_url = 2;
+  string script_path = 3;
+  string label = 4;
+}
+message DeleteJobRequest {
+  string name = 1;
+}
+message DeleteJobResponse {
+  string name = 1;
+}
+
+message GitBranch {
+  string name = 1;
+  string commit = 2;
+}
+message ListBranchesRequest {
+  string name = 1;
+}
+message ListBranchesResponse {
+  string default_branch = 1;
+  repeated GitBranch branches = 2;
+}
+
+message Build {
+  int64 id = 1;
+  string service = 2;
+  string version = 3;
+  string bin_path = 4;
+  string status = 5;
+  string branch = 6;
+  string commit = 7;
+  string log = 8;
+  string created_at = 9;
+  string error = 10;
+}
+message ListBuildsRequest {
+  string service = 1;
+}
+message ListBuildsResponse {
+  repeated Build builds = 1;
+}
+message GetBuildRequest {
+  int64 id = 1;
+}
+message WatchBuildRequest {
+  int64 id = 1;
+}
+message CreateBuildRequest {
+  string name = 1;
+  string branch = 2;
+}
+
+message RunEvent {
+  string text = 1;
+  bool done = 2;
+  string status = 3;
+  string error = 4;
+}
+
+message Field {
+  int32 id = 1;
+  string type = 2;
+  string name = 3;
+}
+message IdlMethod {
+  string name = 1;
+  string req = 2;
+  string resp = 3;
+  string http_method = 4;
+  string uri = 5;
+  repeated Field req_fields = 6;
+  repeated Field resp_fields = 7;
+}
+message Idl {
+  string name = 1;
+  string service = 2;
+  string content = 3;
+  repeated IdlMethod methods = 4;
+  int32 http_apis = 5;
+  string parse_error = 6;
+}
+message ListIdlsRequest {}
+message ListIdlsResponse {
+  repeated Idl idls = 1;
+}
+message GetIdlRequest {
+  string name = 1;
+}
+message SaveIdlRequest {
+  string name = 1;
+  string content = 2;
+}
+
+message Publish {
+  int64 id = 1;
+  string idl_name = 2;
+  string routes_json = 3;
+  string status = 4;
+  string log = 5;
+  string created_at = 6;
+}
+message ListPublishesRequest {}
+message ListPublishesResponse {
+  repeated Publish publishes = 1;
+}
+message PublishAgwRequest {
+  string name = 1;
+}
+message PublishAgwResponse {
+  string name = 1;
+  string status = 2;
+  repeated IdlMethod methods = 3;
+}
+
+message App {
+  int64 id = 1;
+  string name = 2;
+  string scm_name = 3;
+  repeated string compose = 4;
+  string label = 5;
+  string created_at = 6;
+}
+message ListAppsRequest {}
+message ListAppsResponse {
+  repeated App apps = 1;
+}
+message ShowAppRequest {
+  string name = 1;
+}
+message CreateAppRequest {
+  string name = 1;
+  string scm_name = 2;
+  string compose = 3;
+}
+
+message Deploy {
+  int64 id = 1;
+  string service = 2;
+  string version = 3;
+  string status = 4;
+  string log = 5;
+  string created_at = 6;
+  string error = 7;
+}
+message ListDeploysRequest {
+  string service = 1;
+}
+message ListDeploysResponse {
+  repeated Deploy deploys = 1;
+}
+message GetDeployRequest {
+  int64 id = 1;
+}
+message WatchDeployRequest {
+  int64 id = 1;
+}
+message CreateDeployRequest {
+  string service = 1;
+  string version = 2;
+}
+
+message Container {
+  string id = 1;
+  string name = 2;
+  string service = 3;
+  string image = 4;
+  string status = 5;
+  string state = 6;
+}
+message RuntimeRequest {}
+message RuntimeResponse {
+  repeated Container containers = 1;
+}
+
+message DbTable {
+  string name = 1;
+  string rows = 2;
+  string engine = 3;
+  string created_at = 4;
+  string updated_at = 5;
+  string comment = 6;
+}
+message DbColumn {
+  string name = 1;
+  string type = 2;
+  string nullable = 3;
+  string key = 4;
+  string default_value = 5 [json_name = "default"];
+  string extra = 6;
+  string comment = 7;
+}
+message TableRow {
+  map<string, string> cells = 1;
+}
+message Table {
+  string name = 1;
+  repeated DbColumn columns = 2;
+  repeated TableRow preview = 3;
+}
+message ListTablesRequest {}
+message ListTablesResponse {
+  repeated DbTable tables = 1;
+}
+message GetTableRequest {
+  string name = 1;
+}
+
+message TlbUpstream {
+  string name = 1;
+  string target = 2;
+}
+message ListTlbUpstreamsRequest {}
+message ListTlbUpstreamsResponse {
+  repeated TlbUpstream upstreams = 1;
+}
+message TlbSite {
+  int64 id = 1;
+  string name = 2;
+  string host = 3;
+  int32 routes = 4;
+  string created_at = 5;
+}
+message TlbRoute {
+  int64 id = 1;
+  string name = 2;
+  string path = 3;
+  string target = 4;
+  string created_at = 5;
+}
+message TlbSiteDetail {
+  int64 id = 1;
+  string name = 2;
+  string host = 3;
+  repeated TlbRoute routes = 4;
+  string zone = 5;
+}
+message ListTlbSitesRequest {}
+message ListTlbSitesResponse {
+  repeated TlbSite sites = 1;
+  string zone = 2;
+}
+message CreateTlbSiteRequest {
+  string name = 1;
+}
+message ShowTlbSiteRequest {
+  string name = 1;
+}
+message DeleteTlbSiteRequest {
+  string name = 1;
+}
+message DeleteTlbSiteResponse {
+  string name = 1;
+}
+message CreateTlbRouteRequest {
+  string site = 1;
+  string name = 2;
+  string path = 3;
+  string target = 4;
+}
+message UpdateTlbRouteRequest {
+  string site = 1;
+  int64 id = 2;
+  string name = 3;
+  string path = 4;
+  string target = 5;
+}
+message DeleteTlbRouteRequest {
+  string site = 1;
+  int64 id = 2;
+}
+message DeleteTlbRouteResponse {
+  int64 id = 1;
+}
+message PublishTlbRequest {}
+message PublishTlbResponse {
+  string status = 1;
+  int32 sites = 2;
+  int32 routes = 3;
+}

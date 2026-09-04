@@ -159,14 +159,16 @@ export type TableDetail = {
   preview: Record<string, unknown>[];
 };
 
-function authHeaders(extra?: HeadersInit): HeadersInit {
-  const token = localStorage.getItem("token") || "";
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: "Bearer " + token } : {}),
-    ...(extra as Record<string, string> | undefined),
-  };
+import { Code, ConnectError, createClient, type Interceptor } from "@connectrpc/connect";
+import { createConnectTransport } from "@connectrpc/connect-web";
+import type { Idl as ProtoIdl, Job as ProtoJob, Build as ProtoBuild, App as ProtoApp, Deploy as ProtoDeploy, TlbRoute as ProtoRoute, TlbSite as ProtoSite } from "./gen/platform/v1/platform_pb";
+import { PlatformService } from "./gen/platform/v1/platform_pb";
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
+
+export { errMsg };
 
 function dropSession() {
   localStorage.removeItem("token");
@@ -176,190 +178,220 @@ function dropSession() {
   }
 }
 
-async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
-  const { headers: extra, ...rest } = opts;
-  const res = await fetch(path, {
-    ...rest,
-    headers: authHeaders(extra),
-  });
-  if (res.status === 401 && path !== "/api/login") {
-    dropSession();
+const auth: Interceptor = (next) => async (req) => {
+  const token = localStorage.getItem("token") || "";
+  if (token) {
+    req.header.set("Authorization", "Bearer " + token);
   }
-  const text = await res.text();
-  let data: unknown = null;
   try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { error: text, data: null };
-  }
-  const env = data as { error?: string; data?: T } | null;
-  if (env?.error) {
-    throw new Error(env.error);
-  }
-  if (!res.ok) {
-    throw new Error(res.statusText);
-  }
-  if (env && typeof env === "object" && "data" in env) {
-    return env.data as T;
-  }
-  return data as T;
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-async function readSSE(res: Response, onLog: (text: string) => void): Promise<BuildResult> {
-  const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("text/event-stream")) {
-    const text = await res.text();
-    let data: { error?: string } = {};
-    try {
-      data = text ? (JSON.parse(text) as { error?: string }) : {};
-    } catch {
-      data = { error: text };
+    return await next(req);
+  } catch (e) {
+    if (e instanceof ConnectError && e.code === Code.Unauthenticated && !req.url.endsWith("/Login")) {
+      dropSession();
     }
-    throw new Error(data.error || res.statusText);
+    throw e;
   }
-  if (!res.body) {
-    throw new Error("no stream");
-  }
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "";
-  let done: BuildResult | null = null;
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) {
-      break;
-    }
-    buf += dec.decode(chunk.value, { stream: true });
-    const parts = buf.split("\n\n");
-    buf = parts.pop() || "";
-    for (const block of parts) {
-      let event = "message";
-      let data = "";
-      for (const line of block.split("\n")) {
-        if (line.startsWith("event:")) {
-          event = line.slice(6).trim();
-        } else if (line.startsWith("data:")) {
-          data += line.slice(5).trim();
-        }
-      }
-      if (!data) {
-        continue;
-      }
-      if (event === "log") {
-        const j = JSON.parse(data) as { text?: string };
-        onLog(j.text || "");
-      } else if (event === "done") {
-        done = JSON.parse(data) as BuildResult;
-      }
-    }
-  }
-  if (!done) {
-    throw new Error("stream ended");
-  }
-  if (done.status !== "ok") {
-    throw new Error(done.error || "fail");
-  }
-  return done;
+};
+
+const client = createClient(
+  PlatformService,
+  createConnectTransport({
+    baseUrl: "",
+    interceptors: [auth],
+  }),
+);
+
+const num = (v: bigint | number) => Number(v);
+
+function job(j: ProtoJob): ScmJob {
+  return {
+    id: num(j.id),
+    name: j.name,
+    gitUrl: j.gitUrl,
+    scriptPath: j.scriptPath,
+    branch: j.branch,
+    label: j.label,
+    createdAt: j.createdAt,
+  };
 }
 
-async function streamSSE(path: string, body: unknown, onLog: (text: string) => void): Promise<BuildResult> {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: authHeaders(),
-    body: JSON.stringify(body),
-  });
-  if (res.status === 401) {
-    dropSession();
-  }
-  return readSSE(res, onLog);
+function build(b: ProtoBuild): Build {
+  return {
+    id: num(b.id),
+    service: b.service,
+    version: b.version,
+    binPath: b.binPath,
+    status: b.status,
+    branch: b.branch,
+    commit: b.commit,
+    log: b.log,
+    createdAt: b.createdAt,
+  };
 }
 
-export { errMsg };
+function idl(v: ProtoIdl): IdlView {
+  return {
+    name: v.name,
+    service: v.service,
+    content: v.content,
+    httpApis: v.httpApis,
+    parseError: v.parseError || undefined,
+    methods: v.methods.map((m) => ({
+      name: m.name,
+      req: m.req,
+      resp: m.resp,
+      httpMethod: m.httpMethod,
+      uri: m.uri,
+      reqFields: m.reqFields.map((f) => ({ id: f.id, type: f.type, name: f.name })),
+      respFields: m.respFields.map((f) => ({ id: f.id, type: f.type, name: f.name })),
+    })),
+  };
+}
+
+function app(a: ProtoApp): DeployApp {
+  return {
+    id: num(a.id),
+    name: a.name,
+    scmName: a.scmName,
+    compose: a.compose,
+    label: a.label,
+    createdAt: a.createdAt,
+  };
+}
+
+function deploy(d: ProtoDeploy): DeployRecord {
+  return {
+    id: num(d.id),
+    service: d.service,
+    version: d.version,
+    status: d.status,
+    log: d.log,
+    createdAt: d.createdAt,
+  };
+}
+
+function site(s: ProtoSite): TlbSite {
+  return { id: num(s.id), name: s.name, host: s.host, routes: s.routes, createdAt: s.createdAt };
+}
+
+function route(r: ProtoRoute): TlbRoute {
+  return { id: num(r.id), name: r.name, path: r.path, target: r.target, createdAt: r.createdAt };
+}
+
+async function consumeRun(
+  stream: AsyncIterable<{ text: string; done: boolean; status: string; error: string }>,
+  onLog: (text: string) => void,
+): Promise<BuildResult> {
+  let result: BuildResult = { status: "fail" };
+  for await (const ev of stream) {
+    if (ev.text) {
+      onLog(ev.text);
+    }
+    if (ev.done) {
+      result = { status: ev.status || "ok", error: ev.error || undefined };
+    }
+  }
+  if (result.status !== "ok") {
+    throw new Error(result.error || "fail");
+  }
+  return result;
+}
 
 export const api = {
-  services: () => req<Service[]>("/api/services"),
-  scmJobs: () => req<ScmJobs>("/api/scm/jobs"),
-  scmJob: (name: string) => req<ScmJob>(`/api/scm/jobs/${name}`),
+  services: () => client.listServices({}).then((r) => r.services as Service[]),
+  scmJobs: () => client.listJobs({}).then((r) => ({ jobs: r.jobs.map(job) })),
+  scmJob: (name: string) => client.showJob({ name }).then(job),
   createScmJob: (name: string, gitUrl: string, scriptPath: string, label: string) =>
-    req<ScmJob>("/api/scm/jobs", {
-      method: "POST",
-      body: JSON.stringify({ name, gitUrl, scriptPath, label }),
-    }),
+    client.createJob({ name, gitUrl, scriptPath, label }).then(job),
   updateScmJob: (name: string, gitUrl: string, scriptPath: string, label: string) =>
-    req<ScmJob>(`/api/scm/jobs/${name}`, {
-      method: "PUT",
-      body: JSON.stringify({ gitUrl, scriptPath, label }),
-    }),
-  deleteScmJob: (name: string) =>
-    req<{ name: string }>(`/api/scm/jobs/${name}`, { method: "DELETE" }),
-  branches: (name: string) => req<BranchList>(`/api/scm/jobs/${name}/branches`),
+    client.updateJob({ name, gitUrl, scriptPath, label }).then(job),
+  deleteScmJob: (name: string) => client.deleteJob({ name }),
+  branches: (name: string) =>
+    client.listBranches({ name }).then((r) => ({ default: r.defaultBranch, branches: r.branches })),
   builds: (service?: string) =>
-    req<Build[] | null>("/api/scm/builds" + (service ? `?service=${service}` : "")),
-  buildDetail: (id: number) => req<Build>(`/api/scm/builds/${id}`),
-  createBuild: (name: string, branch: string) =>
-    req<Build>("/api/scm/builds", {
-      method: "POST",
-      body: JSON.stringify({ name, branch }),
-    }),
-  watchBuild: (id: number, onLog: (text: string) => void) =>
-    fetch("/api/scm/builds/" + id + "/stream", { headers: authHeaders() }).then((res) => {
-      if (res.status === 401) {
-        dropSession();
-      }
-      return readSSE(res, onLog);
-    }),
-  login: (name: string, password: string) =>
-    req<{ token: string; name: string }>("/api/login", {
-      method: "POST",
-      body: JSON.stringify({ name, password }),
-    }),
-  idls: () => req<IdlView[]>("/api/bam/idls"),
-  idl: (name: string) => req<IdlView>(`/api/bam/idls/${name}`),
-  saveIdl: (name: string, content: string) =>
-    req<IdlView>(`/api/bam/idls/${name}`, { method: "PUT", body: JSON.stringify({ content }) }),
-  publishes: () => req<Publish[] | null>("/api/agw/publishes"),
+    client.listBuilds(service ? { service } : {}).then((r) => r.builds.map(build)),
+  buildDetail: (id: number) => client.getBuild({ id: BigInt(id) }).then(build),
+  createBuild: (name: string, branch: string) => client.createBuild({ name, branch }).then(build),
+  watchBuild: (id: number, onLog: (text: string) => void) => consumeRun(client.watchBuild({ id: BigInt(id) }), onLog),
+  login: (name: string, password: string) => client.login({ name, password }),
+  idls: () => client.listIdls({}).then((r) => r.idls.map(idl)),
+  idl: (name: string) => client.getIdl({ name }).then(idl),
+  saveIdl: (name: string, content: string) => client.saveIdl({ name, content }).then(idl),
+  publishes: () =>
+    client.listPublishes({}).then((r) =>
+      r.publishes.map((p) => ({
+        id: num(p.id),
+        idlName: p.idlName,
+        routesJson: p.routesJson,
+        status: p.status,
+        log: p.log,
+        createdAt: p.createdAt,
+      })),
+    ),
   publish: (name: string) =>
-    req<{ name: string; status: string; methods: IdlMethod[] }>("/api/agw/publish", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
-  deployApps: () => req<DeployApps>("/api/deploy/apps"),
-  deployApp: (name: string) => req<DeployApp>(`/api/deploy/apps/${name}`),
+    client.publishAgw({ name }).then((r) => ({
+      name: r.name,
+      status: r.status,
+      methods: r.methods.map((m) => ({
+        name: m.name,
+        req: m.req,
+        resp: m.resp,
+        httpMethod: m.httpMethod,
+        uri: m.uri,
+      })),
+    })),
+  deployApps: () => client.listApps({}).then((r) => ({ apps: r.apps.map(app) })),
+  deployApp: (name: string) => client.showApp({ name }).then(app),
   createDeployApp: (name: string, scmName: string, compose: string) =>
-    req<DeployApp>("/api/deploy/apps", {
-      method: "POST",
-      body: JSON.stringify({ name, scmName, compose }),
-    }),
+    client.createApp({ name, scmName, compose }).then(app),
   deploys: (service?: string) =>
-    req<DeployRecord[] | null>("/api/deploys" + (service ? `?service=${service}` : "")),
-  deployDetail: (id: number) => req<DeployRecord>(`/api/deploys/${id}`),
-  deploy: (service: string, version: string, onLog: (text: string) => void) =>
-    streamSSE("/api/deploys", { service, version }, onLog),
-  runtime: () => req<Container[] | null>("/api/runtime"),
-  tables: () => req<DbTable[] | null>("/api/db/tables"),
-  table: (name: string) => req<TableDetail>(`/api/db/tables/${name}`),
-  tlbUpstreams: () => req<{ upstreams: { name: string; target: string }[] | null }>("/api/tlb/upstreams"),
-  tlbSites: () => req<{ sites: TlbSite[] | null; zone: string }>("/api/tlb/sites"),
-  tlbSite: (name: string) => req<TlbSiteDetail>("/api/tlb/sites/" + name),
-  createTlbSite: (name: string) =>
-    req<TlbSite>("/api/tlb/sites", { method: "POST", body: JSON.stringify({ name }) }),
-  deleteTlbSite: (name: string) =>
-    req<{ name: string }>("/api/tlb/sites/" + name, { method: "DELETE" }),
-  createTlbRoute: (site: string, name: string, path: string, target: string) =>
-    req<TlbRoute>("/api/tlb/sites/" + site + "/routes", {
-      method: "POST",
-      body: JSON.stringify({ name, path, target }),
-    }),
-  updateTlbRoute: (site: string, id: number, name: string, path: string, target: string) =>
-    req<TlbRoute>("/api/tlb/sites/" + site + "/routes/" + id, {
-      method: "PUT",
-      body: JSON.stringify({ name, path, target }),
-    }),
-  deleteTlbRoute: (site: string, id: number) =>
-    req<{ id: number }>("/api/tlb/sites/" + site + "/routes/" + id, { method: "DELETE" }),
-  publishTlb: () => req<{ status: string; sites: number; routes: number }>("/api/tlb/publish", { method: "POST" }),
+    client.listDeploys(service ? { service } : {}).then((r) => r.deploys.map(deploy)),
+  deployDetail: (id: number) => client.getDeploy({ id: BigInt(id) }).then(deploy),
+  deploy: async (service: string, version: string, onLog: (text: string) => void) => {
+    const d = await client.createDeploy({ service, version });
+    return consumeRun(client.watchDeploy({ id: d.id }), onLog);
+  },
+  runtime: () =>
+    client.runtime({}).then((r) =>
+      r.containers.map((c) => ({
+        ID: c.id,
+        Name: c.name,
+        Service: c.service,
+        Image: c.image,
+        Status: c.status,
+        State: c.state,
+      })),
+    ),
+  tables: () => client.listTables({}).then((r) => r.tables as DbTable[]),
+  table: (name: string) =>
+    client.getTable({ name }).then((t) => ({
+      name: t.name,
+      columns: t.columns.map((c) => ({
+        name: c.name,
+        type: c.type,
+        nullable: c.nullable,
+        key: c.key,
+        default: c.defaultValue || null,
+        extra: c.extra,
+      })),
+      preview: t.preview.map((row) => ({ ...row.cells })),
+    })),
+  tlbUpstreams: () => client.listTlbUpstreams({}).then((r) => ({ upstreams: r.upstreams })),
+  tlbSites: () => client.listTlbSites({}).then((r) => ({ sites: r.sites.map(site), zone: r.zone })),
+  tlbSite: (name: string) =>
+    client.showTlbSite({ name }).then((d) => ({
+      id: num(d.id),
+      name: d.name,
+      host: d.host,
+      routes: d.routes.map(route),
+      zone: d.zone,
+    })),
+  createTlbSite: (name: string) => client.createTlbSite({ name }).then(site),
+  deleteTlbSite: (name: string) => client.deleteTlbSite({ name }),
+  createTlbRoute: (siteName: string, name: string, path: string, target: string) =>
+    client.createTlbRoute({ site: siteName, name, path, target }).then(route),
+  updateTlbRoute: (siteName: string, id: number, name: string, path: string, target: string) =>
+    client.updateTlbRoute({ site: siteName, id: BigInt(id), name, path, target }).then(route),
+  deleteTlbRoute: (siteName: string, id: number) => client.deleteTlbRoute({ site: siteName, id: BigInt(id) }),
+  publishTlb: () => client.publishTlb({}),
 };

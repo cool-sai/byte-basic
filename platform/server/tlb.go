@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
+	"time"
+
+	"connectrpc.com/connect"
+
+	v1 "minikitex/gen/platform/v1"
 )
 
 const tlbZone = "ls-byte-basic.com"
@@ -86,10 +90,15 @@ func seedTlb(db *sql.DB) error {
 		return err
 	}
 	if n > 0 {
+		_, _ = db.Exec(
+			`INSERT IGNORE INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`,
+			consoleID, "platform-connect", "/platform.v1.PlatformService", "platform:8081",
+		)
 		return nil
 	}
 	for _, r := range []tlbRoute{
 		{Name: "platform-api", Path: "/api", Target: "platform:8081"},
+		{Name: "platform-connect", Path: "/platform.v1.PlatformService", Target: "platform:8081"},
 		{Name: "order", Path: "/order", Target: "order:8080"},
 		{Name: "platform-web", Path: "/", Target: "platform:8081"},
 	} {
@@ -109,7 +118,7 @@ func (s *server) getTlbSite(name string) (tlbSite, error) {
 	return st, nil
 }
 
-func (s *server) listTlbSites(w http.ResponseWriter, _ *http.Request) {
+func (s *server) ListTlbSites(context.Context, *connect.Request[v1.ListTlbSitesRequest]) (*connect.Response[v1.ListTlbSitesResponse], error) {
 	rows, err := s.db.Query(`
 		SELECT s.id, s.name, s.host, s.created_at, COUNT(r.id)
 		FROM tlb_site s
@@ -117,101 +126,85 @@ func (s *server) listTlbSites(w http.ResponseWriter, _ *http.Request) {
 		GROUP BY s.id, s.name, s.host, s.created_at
 		ORDER BY s.id`)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	defer rows.Close()
-	sites := scanRows(rows, "id", "name", "host", "createdAt", "routes")
-	if sites == nil {
-		sites = []map[string]any{}
+	var sites []*v1.TlbSite
+	for rows.Next() {
+		st := &v1.TlbSite{}
+		var t time.Time
+		var n int32
+		if err := rows.Scan(&st.Id, &st.Name, &st.Host, &t, &n); err != nil {
+			return nil, internal(err)
+		}
+		st.CreatedAt = fmtTime(t)
+		st.Routes = n
+		sites = append(sites, st)
 	}
-	writeJSON(w, map[string]any{"sites": sites, "zone": tlbZone})
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	return connect.NewResponse(&v1.ListTlbSitesResponse{Sites: sites, Zone: tlbZone}), nil
 }
 
-func (s *server) showTlbSite(w http.ResponseWriter, r *http.Request) {
-	st, err := s.getTlbSite(r.PathValue("name"))
+func (s *server) ShowTlbSite(_ context.Context, req *connect.Request[v1.ShowTlbSiteRequest]) (*connect.Response[v1.TlbSiteDetail], error) {
+	st, err := s.getTlbSite(req.Msg.Name)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
 	rows, err := s.db.Query(`SELECT id, name, path_prefix, target, created_at FROM tlb_route WHERE site_id=? ORDER BY CHAR_LENGTH(path_prefix) DESC, id`, st.ID)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	defer rows.Close()
-	routes := scanRows(rows, "id", "name", "path", "target", "createdAt")
-	if routes == nil {
-		routes = []map[string]any{}
+	var routes []*v1.TlbRoute
+	for rows.Next() {
+		r := &v1.TlbRoute{}
+		var t time.Time
+		if err := rows.Scan(&r.Id, &r.Name, &r.Path, &r.Target, &t); err != nil {
+			return nil, internal(err)
+		}
+		r.CreatedAt = fmtTime(t)
+		routes = append(routes, r)
 	}
-	writeJSON(w, map[string]any{"id": st.ID, "name": st.Name, "host": st.Host, "routes": routes, "zone": tlbZone})
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	return connect.NewResponse(&v1.TlbSiteDetail{
+		Id: st.ID, Name: st.Name, Host: st.Host, Routes: routes, Zone: tlbZone,
+	}), nil
 }
 
-func (s *server) createTlbSite(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name string `json:"name"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	name, err := checkTlbSub(body.Name)
+func (s *server) CreateTlbSite(_ context.Context, req *connect.Request[v1.CreateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error) {
+	name, err := checkTlbSub(req.Msg.Name)
 	if err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
 	host := tlbHost(name)
-	_, err = s.db.Exec(`INSERT INTO tlb_site (name, host) VALUES (?,?)`, name, host)
+	res, err := s.db.Exec(`INSERT INTO tlb_site (name, host) VALUES (?,?)`, name, host)
 	if err != nil {
-		fail(w, 400, fmt.Errorf("create tlb site: %w", err))
-		return
+		return nil, invalid(fmt.Errorf("create tlb site: %w", err))
 	}
-	writeJSON(w, map[string]any{"name": name, "host": host})
+	id, _ := res.LastInsertId()
+	return connect.NewResponse(&v1.TlbSite{Id: id, Name: name, Host: host}), nil
 }
 
-func (s *server) deleteTlbSite(w http.ResponseWriter, r *http.Request) {
-	st, err := s.getTlbSite(r.PathValue("name"))
+func (s *server) DeleteTlbSite(_ context.Context, req *connect.Request[v1.DeleteTlbSiteRequest]) (*connect.Response[v1.DeleteTlbSiteResponse], error) {
+	st, err := s.getTlbSite(req.Msg.Name)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM tlb_route WHERE site_id=?`, st.ID); err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM tlb_site WHERE id=?`, st.ID); err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
-	writeJSON(w, map[string]any{"name": st.Name})
+	return connect.NewResponse(&v1.DeleteTlbSiteResponse{Name: st.Name}), nil
 }
 
-func (s *server) createTlbRoute(w http.ResponseWriter, r *http.Request) {
-	st, err := s.getTlbSite(r.PathValue("name"))
-	if err != nil {
-		fail(w, 404, err)
-		return
-	}
-	var body struct {
-		Name   string `json:"name"`
-		Path   string `json:"path"`
-		Target string `json:"target"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	path, err := checkTlbPath(body.Path)
-	if err != nil {
-		fail(w, 400, err)
-		return
-	}
-	target, err := checkTlbTarget(body.Target)
-	if err != nil {
-		fail(w, 400, err)
-		return
-	}
-	name := strings.TrimSpace(body.Name)
+func tlbRouteName(name, path string) (string, error) {
+	name = strings.TrimSpace(name)
 	if name == "" {
 		name = strings.Trim(path, "/")
 		if name == "" {
@@ -219,113 +212,94 @@ func (s *server) createTlbRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !jobName.MatchString(name) {
-		fail(w, 400, fmt.Errorf("bad route name"))
-		return
+		return "", fmt.Errorf("bad route name")
+	}
+	return name, nil
+}
+
+func (s *server) CreateTlbRoute(_ context.Context, req *connect.Request[v1.CreateTlbRouteRequest]) (*connect.Response[v1.TlbRoute], error) {
+	st, err := s.getTlbSite(req.Msg.Site)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	path, err := checkTlbPath(req.Msg.Path)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	target, err := checkTlbTarget(req.Msg.Target)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	name, err := tlbRouteName(req.Msg.Name, path)
+	if err != nil {
+		return nil, invalid(err)
 	}
 	res, err := s.db.Exec(`INSERT INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`, st.ID, name, path, target)
 	if err != nil {
-		fail(w, 400, fmt.Errorf("create tlb route: %w", err))
-		return
+		return nil, invalid(fmt.Errorf("create tlb route: %w", err))
 	}
 	id, _ := res.LastInsertId()
-	writeJSON(w, map[string]any{"id": id, "name": name, "path": path, "target": target})
+	return connect.NewResponse(&v1.TlbRoute{Id: id, Name: name, Path: path, Target: target}), nil
 }
 
-func (s *server) updateTlbRoute(w http.ResponseWriter, r *http.Request) {
-	st, err := s.getTlbSite(r.PathValue("name"))
+func (s *server) UpdateTlbRoute(_ context.Context, req *connect.Request[v1.UpdateTlbRouteRequest]) (*connect.Response[v1.TlbRoute], error) {
+	st, err := s.getTlbSite(req.Msg.Site)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	path, err := checkTlbPath(req.Msg.Path)
 	if err != nil {
-		fail(w, 400, fmt.Errorf("bad id"))
-		return
+		return nil, invalid(err)
 	}
-	var body struct {
-		Name   string `json:"name"`
-		Path   string `json:"path"`
-		Target string `json:"target"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	path, err := checkTlbPath(body.Path)
+	target, err := checkTlbTarget(req.Msg.Target)
 	if err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
-	target, err := checkTlbTarget(body.Target)
+	name, err := tlbRouteName(req.Msg.Name, path)
 	if err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
-	name := strings.TrimSpace(body.Name)
-	if name == "" {
-		name = strings.Trim(path, "/")
-		if name == "" {
-			name = "root"
-		}
-	}
-	if !jobName.MatchString(name) {
-		fail(w, 400, fmt.Errorf("bad route name"))
-		return
-	}
-	res, err := s.db.Exec(`UPDATE tlb_route SET name=?, path_prefix=?, target=? WHERE id=? AND site_id=?`, name, path, target, id, st.ID)
+	res, err := s.db.Exec(`UPDATE tlb_route SET name=?, path_prefix=?, target=? WHERE id=? AND site_id=?`, name, path, target, req.Msg.Id, st.ID)
 	if err != nil {
-		fail(w, 400, fmt.Errorf("update tlb route: %w", err))
-		return
+		return nil, invalid(fmt.Errorf("update tlb route: %w", err))
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		fail(w, 404, fmt.Errorf("no tlb route %d", id))
-		return
+		return nil, notFound(fmt.Errorf("no tlb route %d", req.Msg.Id))
 	}
-	writeJSON(w, map[string]any{"id": id, "name": name, "path": path, "target": target})
+	return connect.NewResponse(&v1.TlbRoute{Id: req.Msg.Id, Name: name, Path: path, Target: target}), nil
 }
 
-func (s *server) deleteTlbRoute(w http.ResponseWriter, r *http.Request) {
-	st, err := s.getTlbSite(r.PathValue("name"))
+func (s *server) DeleteTlbRoute(_ context.Context, req *connect.Request[v1.DeleteTlbRouteRequest]) (*connect.Response[v1.DeleteTlbRouteResponse], error) {
+	st, err := s.getTlbSite(req.Msg.Site)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	res, err := s.db.Exec(`DELETE FROM tlb_route WHERE id=? AND site_id=?`, req.Msg.Id, st.ID)
 	if err != nil {
-		fail(w, 400, fmt.Errorf("bad id"))
-		return
-	}
-	res, err := s.db.Exec(`DELETE FROM tlb_route WHERE id=? AND site_id=?`, id, st.ID)
-	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		fail(w, 404, fmt.Errorf("no tlb route %d", id))
-		return
+		return nil, notFound(fmt.Errorf("no tlb route %d", req.Msg.Id))
 	}
-	writeJSON(w, map[string]any{"id": id})
+	return connect.NewResponse(&v1.DeleteTlbRouteResponse{Id: req.Msg.Id}), nil
 }
 
-func (s *server) publishTlb(w http.ResponseWriter, _ *http.Request) {
+func (s *server) PublishTlb(context.Context, *connect.Request[v1.PublishTlbRequest]) (*connect.Response[v1.PublishTlbResponse], error) {
 	sites, err := s.loadTlb()
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	if len(sites) == 0 {
-		fail(w, 400, fmt.Errorf("没有配置"))
-		return
+		return nil, invalid(fmt.Errorf("没有配置"))
 	}
 	n := 0
 	for _, st := range sites {
 		n += len(st.routes)
 	}
 	if n == 0 {
-		fail(w, 400, fmt.Errorf("没有路由"))
-		return
+		return nil, invalid(fmt.Errorf("没有路由"))
 	}
 	conf := renderTlbNginx(sites)
 	cmd := s.composeCmd("exec", "-T", "tlb", "sh", "-c",
@@ -333,10 +307,9 @@ func (s *server) publishTlb(w http.ResponseWriter, _ *http.Request) {
 	cmd.Stdin = strings.NewReader(conf)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		fail(w, 500, fmt.Errorf("nginx: %w\n%s", err, out))
-		return
+		return nil, internal(fmt.Errorf("nginx: %w\n%s", err, out))
 	}
-	writeJSON(w, map[string]any{"status": "ok", "sites": len(sites), "routes": n})
+	return connect.NewResponse(&v1.PublishTlbResponse{Status: "ok", Sites: int32(len(sites)), Routes: int32(n)}), nil
 }
 
 type tlbSiteFull struct {
@@ -502,7 +475,7 @@ func tlbListenPort(name string) string {
 	}
 }
 
-func (s *server) listTlbUpstreams(w http.ResponseWriter, _ *http.Request) {
+func (s *server) ListTlbUpstreams(context.Context, *connect.Request[v1.ListTlbUpstreamsRequest]) (*connect.Response[v1.ListTlbUpstreamsResponse], error) {
 	names := map[string]bool{}
 	add := func(n string) {
 		n = strings.TrimSpace(n)
@@ -535,10 +508,9 @@ func (s *server) listTlbUpstreams(w http.ResponseWriter, _ *http.Request) {
 		list = append(list, n)
 	}
 	sort.Strings(list)
-	up := make([]map[string]any, 0, len(list))
+	up := make([]*v1.TlbUpstream, 0, len(list))
 	for _, n := range list {
-		port := tlbListenPort(n)
-		up = append(up, map[string]any{"name": n, "target": n + ":" + port})
+		up = append(up, &v1.TlbUpstream{Name: n, Target: n + ":" + tlbListenPort(n)})
 	}
-	writeJSON(w, map[string]any{"upstreams": up})
+	return connect.NewResponse(&v1.ListTlbUpstreamsResponse{Upstreams: up}), nil
 }

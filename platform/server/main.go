@@ -1,12 +1,10 @@
 package main
 
 import (
+	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +12,10 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	v1 "minikitex/gen/platform/v1"
 	"minikitex/idl"
+
+	"connectrpc.com/connect"
 )
 
 type Service struct {
@@ -50,65 +51,8 @@ func main() {
 		log.Fatal(err)
 	}
 	s := &server{root: root, db: db}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/services", s.getServices)
-	mux.HandleFunc("GET /api/scm/jobs", s.listJobs)
-	mux.HandleFunc("GET /api/scm/jobs/{name}", s.showJob)
-	mux.HandleFunc("GET /api/scm/jobs/{name}/branches", s.listBranches)
-	mux.HandleFunc("POST /api/scm/jobs", s.createJob)
-	mux.HandleFunc("PUT /api/scm/jobs/{name}", s.updateJob)
-	mux.HandleFunc("DELETE /api/scm/jobs/{name}", s.deleteJob)
-	mux.HandleFunc("GET /api/scm/builds", s.listBuilds)
-	mux.HandleFunc("GET /api/scm/builds/{id}", s.getBuild)
-	mux.HandleFunc("GET /api/scm/builds/{id}/stream", s.streamBuild)
-	mux.HandleFunc("POST /api/scm/builds", s.createBuild)
-	mux.HandleFunc("GET /api/bam/idls", s.listIDLs)
-	mux.HandleFunc("GET /api/bam/idls/{name}", s.getIDL)
-	mux.HandleFunc("PUT /api/bam/idls/{name}", s.saveIDL)
-	mux.HandleFunc("GET /api/agw/publishes", s.listPublishes)
-	mux.HandleFunc("POST /api/agw/publish", s.publishAGW)
-	mux.HandleFunc("GET /api/deploy/apps", s.listApps)
-	mux.HandleFunc("GET /api/deploy/apps/{name}", s.showApp)
-	mux.HandleFunc("POST /api/deploy/apps", s.createApp)
-	mux.HandleFunc("GET /api/deploys", s.listDeploys)
-	mux.HandleFunc("GET /api/deploys/{id}", s.getDeploy)
-	mux.HandleFunc("POST /api/deploys", s.createDeploy)
-	mux.HandleFunc("GET /api/runtime", s.runtime)
-	mux.HandleFunc("GET /api/db/tables", s.listTables)
-	mux.HandleFunc("GET /api/db/tables/{name}", s.getTable)
-	mux.HandleFunc("GET /api/tlb/upstreams", s.listTlbUpstreams)
-	mux.HandleFunc("GET /api/tlb/sites", s.listTlbSites)
-	mux.HandleFunc("POST /api/tlb/sites", s.createTlbSite)
-	mux.HandleFunc("GET /api/tlb/sites/{name}", s.showTlbSite)
-	mux.HandleFunc("DELETE /api/tlb/sites/{name}", s.deleteTlbSite)
-	mux.HandleFunc("POST /api/tlb/sites/{name}/routes", s.createTlbRoute)
-	mux.HandleFunc("PUT /api/tlb/sites/{name}/routes/{id}", s.updateTlbRoute)
-	mux.HandleFunc("DELETE /api/tlb/sites/{name}/routes/{id}", s.deleteTlbRoute)
-	mux.HandleFunc("POST /api/tlb/publish", s.publishTlb)
-	mux.HandleFunc("POST /api/login", s.login)
-	mux.HandleFunc("GET /api/me", s.me)
-
-	if web := getenv("WEB_DIR", ""); web != "" {
-		mux.Handle("/", spa(web))
-	}
-
 	addr := getenv("LISTEN", "127.0.0.1:8081")
-	log.Println("platform", addr, "root", root, "web", getenv("WEB_DIR", ""))
-	log.Fatal(http.ListenAndServe(addr, cors(s.auth(mux))))
-}
-
-func spa(dir string) http.Handler {
-	fs := http.FileServer(http.Dir(dir))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rel := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
-		p := filepath.Join(dir, rel)
-		st, err := os.Stat(p)
-		if err != nil || st.IsDir() {
-			http.ServeFile(w, r, filepath.Join(dir, "index.html"))
-			return
-		}
-		fs.ServeHTTP(w, r)
-	})
+	log.Fatal(s.serveHTTP(addr))
 }
 
 func waitDB(dsn string) (*sql.DB, error) {
@@ -222,78 +166,55 @@ func skipAlter(err error) bool {
 		strings.Contains(s, "check that column/key exists")
 }
 
-func (s *server) getServices(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, catalog)
+func (s *server) ListServices(context.Context, *connect.Request[v1.ListServicesRequest]) (*connect.Response[v1.ListServicesResponse], error) {
+	out := make([]*v1.Service, 0, len(catalog))
+	for _, c := range catalog {
+		out = append(out, &v1.Service{Name: c.Name, Bin: c.Bin, Pkg: c.Pkg, Compose: c.Compose})
+	}
+	return connect.NewResponse(&v1.ListServicesResponse{Services: out}), nil
 }
 
-func (s *server) listIDLs(w http.ResponseWriter, _ *http.Request) {
+func (s *server) ListIdls(_ context.Context, _ *connect.Request[v1.ListIdlsRequest]) (*connect.Response[v1.ListIdlsResponse], error) {
 	matches, err := filepath.Glob(filepath.Join(s.root, "idl", "*.thrift"))
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
-	var out []map[string]any
+	var out []*v1.Idl
 	for _, path := range matches {
 		name := strings.TrimSuffix(filepath.Base(path), ".thrift")
 		b, err := os.ReadFile(path)
 		if err != nil {
-			fail(w, 500, err)
-			return
+			return nil, internal(err)
 		}
-		view, err := idlView(name, string(b))
-		if err != nil {
-			out = append(out, map[string]any{"name": name, "parseError": err.Error(), "content": string(b)})
-			continue
-		}
-		out = append(out, view)
+		out = append(out, idlView(name, string(b)))
 	}
-	writeJSON(w, out)
+	return connect.NewResponse(&v1.ListIdlsResponse{Idls: out}), nil
 }
 
-func (s *server) getIDL(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	path, err := s.idlPath(name)
+func (s *server) GetIdl(_ context.Context, req *connect.Request[v1.GetIdlRequest]) (*connect.Response[v1.Idl], error) {
+	path, err := s.idlPath(req.Msg.Name)
 	if err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
-	view, err := idlView(name, string(b))
-	if err != nil {
-		writeJSON(w, map[string]any{"name": name, "parseError": err.Error(), "content": string(b)})
-		return
-	}
-	writeJSON(w, view)
+	return connect.NewResponse(idlView(req.Msg.Name, string(b))), nil
 }
 
-func (s *server) saveIDL(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	path, err := s.idlPath(name)
+func (s *server) SaveIdl(_ context.Context, req *connect.Request[v1.SaveIdlRequest]) (*connect.Response[v1.Idl], error) {
+	path, err := s.idlPath(req.Msg.Name)
 	if err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
-	var body struct {
-		Content string `json:"content"`
+	if _, err := idl.ParseString(req.Msg.Content); err != nil {
+		return nil, invalid(fmt.Errorf("idl parse: %w", err))
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		fail(w, 400, err)
-		return
+	if err := os.WriteFile(path, []byte(req.Msg.Content), 0o644); err != nil {
+		return nil, internal(err)
 	}
-	if _, err := idl.ParseString(body.Content); err != nil {
-		fail(w, 400, fmt.Errorf("idl parse: %w", err))
-		return
-	}
-	if err := os.WriteFile(path, []byte(body.Content), 0o644); err != nil {
-		fail(w, 500, err)
-		return
-	}
-	view, _ := idlView(name, body.Content)
-	writeJSON(w, view)
+	return connect.NewResponse(idlView(req.Msg.Name, req.Msg.Content)), nil
 }
 
 func (s *server) idlPath(name string) (string, error) {
@@ -303,84 +224,46 @@ func (s *server) idlPath(name string) (string, error) {
 	return filepath.Join(s.root, "idl", name+".thrift"), nil
 }
 
-func idlView(name, content string) (map[string]any, error) {
+func idlView(name, content string) *v1.Idl {
+	view := &v1.Idl{Name: name, Content: content}
 	spec, err := idl.ParseString(content)
 	if err != nil {
-		return nil, err
+		view.ParseError = err.Error()
+		return view
 	}
-	var methods []map[string]any
-	httpN := 0
+	view.Service = spec.Service
 	for _, m := range spec.Methods {
 		req, _ := spec.Struct(m.Req)
 		resp, _ := spec.Struct(m.Resp)
-		item := map[string]any{
-			"name":       m.Name,
-			"req":        m.Req,
-			"resp":       m.Resp,
-			"httpMethod": m.HTTPMethod,
-			"uri":        m.URI,
-			"reqFields":  fieldsOf(req),
-			"respFields": fieldsOf(resp),
+		item := &v1.IdlMethod{
+			Name:       m.Name,
+			Req:        m.Req,
+			Resp:       m.Resp,
+			HttpMethod: m.HTTPMethod,
+			Uri:        m.URI,
+			ReqFields:  fieldsOf(req),
+			RespFields: fieldsOf(resp),
 		}
 		if m.URI != "" {
-			httpN++
-			if item["httpMethod"] == "" {
-				item["httpMethod"] = "POST"
+			view.HttpApis++
+			if item.HttpMethod == "" {
+				item.HttpMethod = "POST"
 			}
 		}
-		methods = append(methods, item)
+		view.Methods = append(view.Methods, item)
 	}
-	return map[string]any{
-		"name":     name,
-		"service":  spec.Service,
-		"content":  content,
-		"methods":  methods,
-		"httpApis": httpN,
-	}, nil
+	return view
 }
 
-func fieldsOf(st *idl.Struct) []map[string]any {
+func fieldsOf(st *idl.Struct) []*v1.Field {
 	if st == nil {
 		return nil
 	}
-	var out []map[string]any
+	var out []*v1.Field
 	for _, f := range st.Fields {
-		out = append(out, map[string]any{"id": f.ID, "type": f.Type, "name": f.Name})
+		out = append(out, &v1.Field{Id: int32(f.ID), Type: f.Type, Name: f.Name})
 	}
 	return out
-}
-
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(204)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": "", "data": v})
-}
-
-func fail(w http.ResponseWriter, code int, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "data": nil})
-}
-
-func readJSON(r *http.Request, v any) error {
-	defer r.Body.Close()
-	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
 }
 
 func getenv(k, def string) string {

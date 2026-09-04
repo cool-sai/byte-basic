@@ -8,12 +8,16 @@
   },
   "dependencies": {
     "@arco-design/web-react": "^2.66.5",
+    "@bufbuild/protobuf": "^2.14.1",
+    "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect-web": "^2.1.2",
     "ahooks": "^3.9.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.6"
   },
   "devDependencies": {
+    "@bufbuild/protoc-gen-es": "^2.13.0",
     "@tailwindcss/vite": "^4.1.11",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",

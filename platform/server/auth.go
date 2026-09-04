@@ -4,13 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	v1 "minikitex/gen/platform/v1"
 )
 
 type userKey struct{}
@@ -48,79 +50,53 @@ func seedAdmin(db *sql.DB) error {
 	return err
 }
 
-func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name     string `json:"name"`
-		Password string `json:"password"`
+func parseToken(raw string) (string, error) {
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "Bearer "))
+	if raw == "" {
+		return "", unauth(fmt.Errorf("未登录"))
 	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
+	claims := &jwt.RegisteredClaims{}
+	tok, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
+		if t.Method != jwt.SigningMethodHS256 {
+			return nil, fmt.Errorf("alg")
+		}
+		return jwtSecret(), nil
+	})
+	if err != nil || !tok.Valid || claims.Subject == "" {
+		return "", unauth(fmt.Errorf("未登录"))
 	}
-	body.Name = strings.TrimSpace(body.Name)
-	if body.Name == "" || body.Password == "" {
-		fail(w, 400, fmt.Errorf("请输入用户名和密码"))
-		return
+	return claims.Subject, nil
+}
+
+func (s *server) Login(_ context.Context, req *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error) {
+	name := strings.TrimSpace(req.Msg.Name)
+	if name == "" || req.Msg.Password == "" {
+		return nil, invalid(fmt.Errorf("请输入用户名和密码"))
 	}
 	var hash string
-	err := s.db.QueryRow(`SELECT pass_hash FROM account WHERE name=?`, body.Name).Scan(&hash)
+	err := s.db.QueryRow(`SELECT pass_hash FROM account WHERE name=?`, name).Scan(&hash)
 	if err == sql.ErrNoRows {
-		fail(w, 401, fmt.Errorf("用户名或密码错误"))
-		return
+		return nil, unauth(fmt.Errorf("用户名或密码错误"))
 	}
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Password)) != nil {
-		fail(w, 401, fmt.Errorf("用户名或密码错误"))
-		return
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Msg.Password)) != nil {
+		return nil, unauth(fmt.Errorf("用户名或密码错误"))
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Subject:   body.Name,
+		Subject:   name,
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	})
 	signed, err := tok.SignedString(jwtSecret())
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
-	writeJSON(w, map[string]any{"token": signed, "name": body.Name})
+	return connect.NewResponse(&v1.LoginResponse{Token: signed, Name: name}), nil
 }
 
-func (s *server) me(w http.ResponseWriter, r *http.Request) {
-	name, _ := r.Context().Value(userKey{}).(string)
-	writeJSON(w, map[string]any{"name": name})
-}
-
-func (s *server) auth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/login" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-		raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if raw == "" || raw == r.Header.Get("Authorization") {
-			fail(w, 401, fmt.Errorf("未登录"))
-			return
-		}
-		claims := &jwt.RegisteredClaims{}
-		tok, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
-			if t.Method != jwt.SigningMethodHS256 {
-				return nil, fmt.Errorf("alg")
-			}
-			return jwtSecret(), nil
-		})
-		if err != nil || !tok.Valid || claims.Subject == "" {
-			fail(w, 401, fmt.Errorf("未登录"))
-			return
-		}
-		ctx := context.WithValue(r.Context(), userKey{}, claims.Subject)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+func (s *server) Me(ctx context.Context, _ *connect.Request[v1.MeRequest]) (*connect.Response[v1.MeResponse], error) {
+	name, _ := ctx.Value(userKey{}).(string)
+	return connect.NewResponse(&v1.MeResponse{Name: name}), nil
 }

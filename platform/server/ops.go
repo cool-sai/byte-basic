@@ -1,19 +1,22 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"connectrpc.com/connect"
+
+	v1 "minikitex/gen/platform/v1"
 )
 
 var jobName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -27,10 +30,11 @@ type scmJob struct {
 	Label      string
 }
 
-func jsonJob(j scmJob) map[string]any {
-	return map[string]any{
-		"id": j.ID, "name": j.Name, "gitUrl": j.GitURL,
-		"scriptPath": j.ScriptPath, "branch": j.Branch, "label": j.Label,
+func jobProto(j scmJob, created string) *v1.Job {
+	return &v1.Job{
+		Id: j.ID, Name: j.Name, GitUrl: j.GitURL,
+		ScriptPath: j.ScriptPath, Branch: j.Branch, Label: j.Label,
+		CreatedAt: created,
 	}
 }
 
@@ -56,108 +60,85 @@ func checkBranch(s string) error {
 	return nil
 }
 
-func (s *server) listJobs(w http.ResponseWriter, _ *http.Request) {
+func (s *server) ListJobs(context.Context, *connect.Request[v1.ListJobsRequest]) (*connect.Response[v1.ListJobsResponse], error) {
 	rows, err := s.db.Query(`SELECT id, name, repo_dir, script_path, branch, label, created_at FROM scm_job ORDER BY id DESC`)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	defer rows.Close()
-	jobs := scanRows(rows, "id", "name", "gitUrl", "scriptPath", "branch", "label", "createdAt")
-	if jobs == nil {
-		jobs = []map[string]any{}
+	var jobs []*v1.Job
+	for rows.Next() {
+		var j scmJob
+		var t time.Time
+		if err := rows.Scan(&j.ID, &j.Name, &j.GitURL, &j.ScriptPath, &j.Branch, &j.Label, &t); err != nil {
+			return nil, internal(err)
+		}
+		jobs = append(jobs, jobProto(j, fmtTime(t)))
 	}
-	writeJSON(w, map[string]any{"jobs": jobs})
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	return connect.NewResponse(&v1.ListJobsResponse{Jobs: jobs}), nil
 }
 
-func (s *server) createJob(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name       string `json:"name"`
-		GitURL     string `json:"gitUrl"`
-		ScriptPath string `json:"scriptPath"`
-		Label      string `json:"label"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	name := strings.TrimSpace(body.Name)
+func (s *server) CreateJob(_ context.Context, req *connect.Request[v1.CreateJobRequest]) (*connect.Response[v1.Job], error) {
+	name := strings.TrimSpace(req.Msg.Name)
 	if !jobName.MatchString(name) {
-		fail(w, 400, fmt.Errorf("bad scm name"))
-		return
+		return nil, invalid(fmt.Errorf("bad scm name"))
 	}
-	gitURL := strings.TrimSpace(body.GitURL)
+	gitURL := strings.TrimSpace(req.Msg.GitUrl)
 	if gitURL == "" {
-		fail(w, 400, fmt.Errorf("git url required"))
-		return
+		return nil, invalid(fmt.Errorf("git url required"))
 	}
-	scriptPath := strings.TrimSpace(body.ScriptPath)
+	scriptPath := strings.TrimSpace(req.Msg.ScriptPath)
 	if err := checkScriptRel(scriptPath); err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
-	label := strings.TrimSpace(body.Label)
+	label := strings.TrimSpace(req.Msg.Label)
 	if err := checkLabel(label); err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
 	out, err := exec.Command("git", "ls-remote", "--exit-code", gitURL, "HEAD").CombinedOutput()
 	if err != nil {
-		fail(w, 400, fmt.Errorf("git ls-remote: %w\n%s", err, out))
-		return
+		return nil, invalid(fmt.Errorf("git ls-remote: %w\n%s", err, out))
 	}
-	_, err = s.db.Exec(`INSERT INTO scm_job (name, repo_dir, script_path, label) VALUES (?,?,?,?)`, name, gitURL, scriptPath, label)
+	res, err := s.db.Exec(`INSERT INTO scm_job (name, repo_dir, script_path, label) VALUES (?,?,?,?)`, name, gitURL, scriptPath, label)
 	if err != nil {
-		fail(w, 400, fmt.Errorf("create scm: %w", err))
-		return
+		return nil, invalid(fmt.Errorf("create scm: %w", err))
 	}
-	writeJSON(w, map[string]any{"name": name, "gitUrl": gitURL, "scriptPath": scriptPath, "label": label})
+	id, _ := res.LastInsertId()
+	return connect.NewResponse(&v1.Job{Id: id, Name: name, GitUrl: gitURL, ScriptPath: scriptPath, Label: label}), nil
 }
 
-func (s *server) showJob(w http.ResponseWriter, r *http.Request) {
-	j, err := s.getJob(r.PathValue("name"))
+func (s *server) ShowJob(_ context.Context, req *connect.Request[v1.ShowJobRequest]) (*connect.Response[v1.Job], error) {
+	j, err := s.getJob(req.Msg.Name)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
-	writeJSON(w, jsonJob(j))
+	return connect.NewResponse(jobProto(j, "")), nil
 }
 
-func (s *server) updateJob(w http.ResponseWriter, r *http.Request) {
-	j, err := s.getJob(r.PathValue("name"))
+func (s *server) UpdateJob(_ context.Context, req *connect.Request[v1.UpdateJobRequest]) (*connect.Response[v1.Job], error) {
+	j, err := s.getJob(req.Msg.Name)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
-	var body struct {
-		GitURL     string `json:"gitUrl"`
-		ScriptPath string `json:"scriptPath"`
-		Label      string `json:"label"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	gitURL := strings.TrimSpace(body.GitURL)
+	gitURL := strings.TrimSpace(req.Msg.GitUrl)
 	if gitURL == "" {
-		fail(w, 400, fmt.Errorf("git url required"))
-		return
+		return nil, invalid(fmt.Errorf("git url required"))
 	}
-	scriptPath := strings.TrimSpace(body.ScriptPath)
+	scriptPath := strings.TrimSpace(req.Msg.ScriptPath)
 	if err := checkScriptRel(scriptPath); err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
-	label := strings.TrimSpace(body.Label)
+	label := strings.TrimSpace(req.Msg.Label)
 	if err := checkLabel(label); err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
 	if gitURL != j.GitURL {
 		out, err := exec.Command("git", "ls-remote", "--exit-code", gitURL, "HEAD").CombinedOutput()
 		if err != nil {
-			fail(w, 400, fmt.Errorf("git ls-remote: %w\n%s", err, out))
-			return
+			return nil, invalid(fmt.Errorf("git ls-remote: %w\n%s", err, out))
 		}
 	}
 	_, err = s.db.Exec(
@@ -165,42 +146,36 @@ func (s *server) updateJob(w http.ResponseWriter, r *http.Request) {
 		gitURL, scriptPath, label, j.Name,
 	)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	j.GitURL = gitURL
 	j.ScriptPath = scriptPath
 	j.Label = label
-	writeJSON(w, jsonJob(j))
+	return connect.NewResponse(jobProto(j, "")), nil
 }
 
-func (s *server) deleteJob(w http.ResponseWriter, r *http.Request) {
-	j, err := s.getJob(r.PathValue("name"))
+func (s *server) DeleteJob(_ context.Context, req *connect.Request[v1.DeleteJobRequest]) (*connect.Response[v1.DeleteJobResponse], error) {
+	j, err := s.getJob(req.Msg.Name)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
 	var used string
 	err = s.db.QueryRow(`SELECT name FROM deploy_app WHERE scm_name=? LIMIT 1`, j.Name).Scan(&used)
 	if err == nil {
-		fail(w, 400, fmt.Errorf("still used by deploy %s", used))
-		return
+		return nil, invalid(fmt.Errorf("still used by deploy %s", used))
 	}
 	if err != sql.ErrNoRows {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM scm_build WHERE service=?`, j.Name); err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM scm_job WHERE name=?`, j.Name); err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	_ = os.RemoveAll(filepath.Join(s.root, "scm-work", j.Name))
 	_ = os.RemoveAll(filepath.Join(s.root, "artifacts", j.Name))
-	writeJSON(w, map[string]any{"name": j.Name})
+	return connect.NewResponse(&v1.DeleteJobResponse{Name: j.Name}), nil
 }
 
 func (s *server) getJob(name string) (scmJob, error) {
@@ -214,21 +189,18 @@ func (s *server) getJob(name string) (scmJob, error) {
 	return j, err
 }
 
-func (s *server) listBranches(w http.ResponseWriter, r *http.Request) {
-	job, err := s.getJob(r.PathValue("name"))
+func (s *server) ListBranches(_ context.Context, req *connect.Request[v1.ListBranchesRequest]) (*connect.Response[v1.ListBranchesResponse], error) {
+	job, err := s.getJob(req.Msg.Name)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
 	cmd := exec.Command("git", "ls-remote", "--symref", job.GitURL, "HEAD", "refs/heads/*")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		fail(w, 400, fmt.Errorf("git ls-remote: %w\n%s", err, out))
-		return
+		return nil, invalid(fmt.Errorf("git ls-remote: %w\n%s", err, out))
 	}
-	def := ""
-	var branches []map[string]any
+	resp := &v1.ListBranchesResponse{}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -237,22 +209,19 @@ func (s *server) listBranches(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(line, "ref: ") {
 			rest := strings.TrimPrefix(line, "ref: ")
 			ref, _, _ := strings.Cut(rest, "\t")
-			def = strings.TrimPrefix(ref, "refs/heads/")
+			resp.DefaultBranch = strings.TrimPrefix(ref, "refs/heads/")
 			continue
 		}
 		hash, ref, ok := strings.Cut(line, "\t")
 		if !ok || !strings.HasPrefix(ref, "refs/heads/") {
 			continue
 		}
-		branches = append(branches, map[string]any{
-			"name":   strings.TrimPrefix(ref, "refs/heads/"),
-			"commit": hash,
+		resp.Branches = append(resp.Branches, &v1.GitBranch{
+			Name:   strings.TrimPrefix(ref, "refs/heads/"),
+			Commit: hash,
 		})
 	}
-	if branches == nil {
-		branches = []map[string]any{}
-	}
-	writeJSON(w, map[string]any{"default": def, "branches": branches})
+	return connect.NewResponse(resp), nil
 }
 
 func checkScriptRel(rel string) error {
@@ -278,77 +247,15 @@ func scriptInRepo(repo, rel string) (string, error) {
 	return p, nil
 }
 
-type sseLog struct {
-	w     http.ResponseWriter
-	flush http.Flusher
-	buf   strings.Builder
-	cur   strings.Builder
-}
-
-func startSSE(w http.ResponseWriter) (*sseLog, error) {
-	fl, ok := w.(http.Flusher)
-	if !ok {
-		return nil, fmt.Errorf("stream not supported")
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	fl.Flush()
-	return &sseLog{w: w, flush: fl}, nil
-}
-
-func (l *sseLog) Write(p []byte) (int, error) {
-	raw := string(p)
-	l.absorb(raw)
-	text := strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
-	b, err := json.Marshal(map[string]string{"text": text})
-	if err != nil {
-		return 0, err
-	}
-	if _, err := fmt.Fprintf(l.w, "event: log\ndata: %s\n\n", b); err != nil {
-		return 0, err
-	}
-	l.flush.Flush()
-	return len(p), nil
-}
-
-func (l *sseLog) absorb(s string) {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\r':
-			l.cur.Reset()
-		case '\n':
-			l.buf.WriteString(l.cur.String())
-			l.buf.WriteByte('\n')
-			l.cur.Reset()
-		default:
-			l.cur.WriteByte(s[i])
-		}
-	}
-}
-
-func (l *sseLog) done(v map[string]any) {
-	b, _ := json.Marshal(v)
-	fmt.Fprintf(l.w, "event: done\ndata: %s\n\n", b)
-	l.flush.Flush()
-}
-
-func (l *sseLog) String() string {
-	return l.buf.String() + l.cur.String()
-}
-
 var lives sync.Map
 
 type liveRun struct {
 	mu     sync.Mutex
 	buf    strings.Builder
 	cur    strings.Builder
+	sent   int
 	subs   []chan string
-	done   bool
-	result map[string]any
+	closed bool
 }
 
 func (l *liveRun) absorb(s string) {
@@ -368,16 +275,18 @@ func (l *liveRun) absorb(s string) {
 }
 
 func (l *liveRun) Write(p []byte) (int, error) {
-	raw := string(p)
 	l.mu.Lock()
-	l.absorb(raw)
-	subs := append([]chan string(nil), l.subs...)
-	l.mu.Unlock()
-	text := strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
-	for _, ch := range subs {
-		select {
-		case ch <- text:
-		default:
+	defer l.mu.Unlock()
+	l.absorb(string(p))
+	full := l.buf.String() + l.cur.String()
+	if len(full) > l.sent {
+		delta := full[l.sent:]
+		l.sent = len(full)
+		for _, ch := range l.subs {
+			select {
+			case ch <- delta:
+			default:
+			}
 		}
 	}
 	return len(p), nil
@@ -389,41 +298,39 @@ func (l *liveRun) String() string {
 	return l.buf.String() + l.cur.String()
 }
 
-func (l *liveRun) follow() (string, <-chan string, func()) {
+func (l *liveRun) subscribe() (string, <-chan string, func()) {
+	ch := make(chan string, 64)
 	l.mu.Lock()
+	defer l.mu.Unlock()
 	snap := l.buf.String() + l.cur.String()
-	if l.done {
-		l.mu.Unlock()
-		ch := make(chan string)
+	if l.closed {
 		close(ch)
 		return snap, ch, func() {}
 	}
-	ch := make(chan string, 64)
 	l.subs = append(l.subs, ch)
-	l.mu.Unlock()
 	return snap, ch, func() {
 		l.mu.Lock()
 		defer l.mu.Unlock()
-		out := l.subs[:0]
-		for _, c := range l.subs {
-			if c != ch {
-				out = append(out, c)
+		for i, s := range l.subs {
+			if s == ch {
+				l.subs = append(l.subs[:i], l.subs[i+1:]...)
+				break
 			}
 		}
-		l.subs = out
 	}
 }
 
-func (l *liveRun) finish(result map[string]any) {
+func (l *liveRun) finish(map[string]any) {
 	l.mu.Lock()
-	l.done = true
-	l.result = result
-	subs := l.subs
-	l.subs = nil
-	l.mu.Unlock()
-	for _, ch := range subs {
+	defer l.mu.Unlock()
+	if l.closed {
+		return
+	}
+	l.closed = true
+	for _, ch := range l.subs {
 		close(ch)
 	}
+	l.subs = nil
 }
 
 func streamGit(w io.Writer, dir string, args ...string) error {
@@ -467,73 +374,81 @@ func (s *server) gitSync(name, url, branch string, w io.Writer) (string, error) 
 	return work, nil
 }
 
-func (s *server) listBuilds(w http.ResponseWriter, r *http.Request) {
-	svc := r.URL.Query().Get("service")
+func (s *server) ListBuilds(_ context.Context, req *connect.Request[v1.ListBuildsRequest]) (*connect.Response[v1.ListBuildsResponse], error) {
 	q := `SELECT id, service, version, bin_path, status, branch, git_commit, created_at FROM scm_build`
 	var args []any
-	if svc != "" {
+	if svc := strings.TrimSpace(req.Msg.Service); svc != "" {
 		q += ` WHERE service=?`
 		args = append(args, svc)
 	}
 	q += ` ORDER BY id DESC LIMIT 50`
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	defer rows.Close()
-	writeJSON(w, scanRows(rows, "id", "service", "version", "binPath", "status", "branch", "commit", "createdAt"))
+	var builds []*v1.Build
+	for rows.Next() {
+		b := &v1.Build{}
+		var t time.Time
+		if err := rows.Scan(&b.Id, &b.Service, &b.Version, &b.BinPath, &b.Status, &b.Branch, &b.Commit, &t); err != nil {
+			return nil, internal(err)
+		}
+		b.CreatedAt = fmtTime(t)
+		builds = append(builds, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	return connect.NewResponse(&v1.ListBuildsResponse{Builds: builds}), nil
 }
 
-func (s *server) getBuild(w http.ResponseWriter, r *http.Request) {
-	row, err := s.loadBuild(r.PathValue("id"))
-	if err == sql.ErrNoRows {
-		fail(w, 404, fmt.Errorf("build not found"))
-		return
-	}
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	writeJSON(w, row)
-}
-
-func (s *server) loadBuild(id string) (map[string]any, error) {
-	var bid int64
-	var service, version, binPath, status, logText, branch, commit string
-	var created time.Time
-	err := s.db.QueryRow(
-		`SELECT id, service, version, bin_path, status, log_text, branch, git_commit, created_at FROM scm_build WHERE id=?`,
-		id,
-	).Scan(&bid, &service, &version, &binPath, &status, &logText, &branch, &commit, &created)
+func (s *server) GetBuild(_ context.Context, req *connect.Request[v1.GetBuildRequest]) (*connect.Response[v1.Build], error) {
+	b, err := s.loadBuild(req.Msg.Id)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"id": bid, "service": service, "version": version, "binPath": binPath,
-		"status": status, "log": logText, "branch": branch, "commit": commit,
-		"createdAt": fmtTime(created),
-	}, nil
+	return connect.NewResponse(b), nil
 }
 
-func (s *server) createBuild(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name   string `json:"name"`
-		Branch string `json:"branch"`
+func (s *server) WatchBuild(ctx context.Context, req *connect.Request[v1.WatchBuildRequest], stream *connect.ServerStream[v1.RunEvent]) error {
+	return s.watchLive(ctx, req.Msg.Id, stream, s.loadBuild)
+}
+
+func (s *server) loadBuild(id int64) (*v1.Build, error) {
+	b := &v1.Build{}
+	var t time.Time
+	err := s.db.QueryRow(
+		`SELECT id, service, version, bin_path, status, log_text, branch, git_commit, created_at FROM scm_build WHERE id=?`,
+		id,
+	).Scan(&b.Id, &b.Service, &b.Version, &b.BinPath, &b.Status, &b.Log, &b.Branch, &b.Commit, &t)
+	if err == sql.ErrNoRows {
+		return nil, notFound(fmt.Errorf("build not found"))
 	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	job, err := s.getJob(body.Name)
 	if err != nil {
-		fail(w, 400, err)
-		return
+		return nil, internal(err)
 	}
-	branch := strings.TrimSpace(body.Branch)
+	b.CreatedAt = fmtTime(t)
+	if v, ok := lives.Load(b.Id); ok {
+		b.Log = v.(*liveRun).String()
+		if b.Status == "running" {
+			b.Status = "running"
+		}
+	}
+	if b.Status == "fail" && b.Error == "" {
+		b.Error = "fail"
+	}
+	return b, nil
+}
+
+func (s *server) CreateBuild(_ context.Context, req *connect.Request[v1.CreateBuildRequest]) (*connect.Response[v1.Build], error) {
+	job, err := s.getJob(req.Msg.Name)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	branch := strings.TrimSpace(req.Msg.Branch)
 	if err := checkBranch(branch); err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
 	ver := time.Now().Format("20060102-150405")
 	binPath := filepath.Join(s.root, "artifacts", job.Name, ver, job.Name)
@@ -542,69 +457,19 @@ func (s *server) createBuild(w http.ResponseWriter, r *http.Request) {
 		job.Name, ver, binPath, "running", "", branch, "",
 	)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	live := &liveRun{}
 	lives.Store(id, live)
 	go s.runBuild(id, job, branch, ver, binPath, live)
-	writeJSON(w, map[string]any{
-		"id": id, "service": job.Name, "version": ver, "binPath": binPath,
-		"status": "running", "branch": branch, "commit": "",
-	})
-}
-
-func (s *server) streamBuild(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		fail(w, 400, fmt.Errorf("bad id"))
-		return
-	}
-	lg, err := startSSE(w)
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	if v, ok := lives.Load(id); ok {
-		live := v.(*liveRun)
-		snap, ch, cancel := live.follow()
-		defer cancel()
-		if snap != "" {
-			_, _ = lg.Write([]byte(snap))
-		}
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case msg, ok := <-ch:
-				if !ok {
-					live.mu.Lock()
-					res := live.result
-					live.mu.Unlock()
-					if res == nil {
-						res = map[string]any{"status": "fail", "error": "stream ended"}
-					}
-					lg.done(res)
-					return
-				}
-				_, _ = lg.Write([]byte(msg))
-			}
-		}
-	}
-	row, err := s.loadBuild(r.PathValue("id"))
-	if err != nil {
-		lg.done(map[string]any{"status": "fail", "error": err.Error()})
-		return
-	}
-	if logText, _ := row["log"].(string); logText != "" {
-		_, _ = lg.Write([]byte(logText))
-	}
-	lg.done(row)
+	return connect.NewResponse(&v1.Build{
+		Id: id, Service: job.Name, Version: ver, BinPath: binPath,
+		Status: "running", Branch: branch,
+	}), nil
 }
 
 func (s *server) runBuild(id int64, job scmJob, branch, ver, binPath string, live *liveRun) {
@@ -672,40 +537,42 @@ func (s *server) runBuild(id int64, job scmJob, branch, ver, binPath string, liv
 	save(status, commit, err)
 }
 
-func (s *server) listPublishes(w http.ResponseWriter, _ *http.Request) {
+func (s *server) ListPublishes(context.Context, *connect.Request[v1.ListPublishesRequest]) (*connect.Response[v1.ListPublishesResponse], error) {
 	rows, err := s.db.Query(`SELECT id, idl_name, routes_json, status, log_text, created_at FROM agw_publish ORDER BY id DESC LIMIT 50`)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	defer rows.Close()
-	writeJSON(w, scanRows(rows, "id", "idlName", "routesJson", "status", "log", "createdAt"))
+	var out []*v1.Publish
+	for rows.Next() {
+		p := &v1.Publish{}
+		var t time.Time
+		if err := rows.Scan(&p.Id, &p.IdlName, &p.RoutesJson, &p.Status, &p.Log, &t); err != nil {
+			return nil, internal(err)
+		}
+		p.CreatedAt = fmtTime(t)
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	return connect.NewResponse(&v1.ListPublishesResponse{Publishes: out}), nil
 }
 
-func (s *server) publishAGW(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name string `json:"name"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	path, err := s.idlPath(body.Name)
+func (s *server) PublishAgw(_ context.Context, req *connect.Request[v1.PublishAgwRequest]) (*connect.Response[v1.PublishAgwResponse], error) {
+	path, err := s.idlPath(req.Msg.Name)
 	if err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
-	view, err := idlView(body.Name, string(raw))
-	if err != nil {
-		fail(w, 400, err)
-		return
+	view := idlView(req.Msg.Name, string(raw))
+	if view.ParseError != "" {
+		return nil, invalid(fmt.Errorf("%s", view.ParseError))
 	}
-	routes, _ := json.Marshal(view["methods"])
+	routes, _ := json.Marshal(view.Methods)
 	out, err := s.compose("restart", "gateway")
 	status := "ok"
 	if err != nil {
@@ -713,17 +580,15 @@ func (s *server) publishAGW(w http.ResponseWriter, r *http.Request) {
 	}
 	_, dbErr := s.db.Exec(
 		`INSERT INTO agw_publish (idl_name, content, routes_json, status, log_text) VALUES (?,?,?,?,?)`,
-		body.Name, string(raw), string(routes), status, out+"\n"+errStr(err),
+		req.Msg.Name, string(raw), string(routes), status, out+"\n"+errStr(err),
 	)
 	if dbErr != nil {
-		fail(w, 500, dbErr)
-		return
+		return nil, internal(dbErr)
 	}
 	if err != nil {
-		fail(w, 500, fmt.Errorf("agw publish: %w\n%s", err, out))
-		return
+		return nil, internal(fmt.Errorf("agw publish: %w\n%s", err, out))
 	}
-	writeJSON(w, map[string]any{"name": body.Name, "status": status, "methods": view["methods"]})
+	return connect.NewResponse(&v1.PublishAgwResponse{Name: req.Msg.Name, Status: status, Methods: view.Methods}), nil
 }
 
 type deployApp struct {
@@ -746,59 +611,47 @@ func parseCompose(s string) []string {
 	return out
 }
 
-func jsonApp(a deployApp, created string) map[string]any {
-	return map[string]any{
-		"id": a.ID, "name": a.Name, "scmName": a.ScmName,
-		"compose": a.Compose, "label": a.Label, "createdAt": created,
+func appProto(a deployApp, created string) *v1.App {
+	return &v1.App{
+		Id: a.ID, Name: a.Name, ScmName: a.ScmName,
+		Compose: a.Compose, Label: a.Label, CreatedAt: created,
 	}
 }
 
-func (s *server) listApps(w http.ResponseWriter, _ *http.Request) {
+func (s *server) ListApps(context.Context, *connect.Request[v1.ListAppsRequest]) (*connect.Response[v1.ListAppsResponse], error) {
 	rows, err := s.db.Query(`
 		SELECT a.id, a.name, a.scm_name, a.compose, a.created_at, IFNULL(j.label,'')
 		FROM deploy_app a
 		LEFT JOIN scm_job j ON j.name = a.scm_name
 		ORDER BY a.id DESC`)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	defer rows.Close()
-	apps := []map[string]any{}
+	var apps []*v1.App
 	for rows.Next() {
 		var a deployApp
-		var compose, created string
+		var compose string
 		var t time.Time
 		if err := rows.Scan(&a.ID, &a.Name, &a.ScmName, &compose, &t, &a.Label); err != nil {
 			continue
 		}
 		a.Compose = parseCompose(compose)
-		created = fmtTime(t)
-		apps = append(apps, jsonApp(a, created))
+		apps = append(apps, appProto(a, fmtTime(t)))
 	}
-	writeJSON(w, map[string]any{"apps": apps})
+	return connect.NewResponse(&v1.ListAppsResponse{Apps: apps}), nil
 }
 
-func (s *server) createApp(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name    string `json:"name"`
-		ScmName string `json:"scmName"`
-		Compose string `json:"compose"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	name := strings.TrimSpace(body.Name)
+func (s *server) CreateApp(_ context.Context, req *connect.Request[v1.CreateAppRequest]) (*connect.Response[v1.App], error) {
+	name := strings.TrimSpace(req.Msg.Name)
 	if !jobName.MatchString(name) {
-		fail(w, 400, fmt.Errorf("bad deploy name"))
-		return
+		return nil, invalid(fmt.Errorf("bad deploy name"))
 	}
-	if _, err := s.getJob(strings.TrimSpace(body.ScmName)); err != nil {
-		fail(w, 400, fmt.Errorf("scm: %w", err))
-		return
+	scmName := strings.TrimSpace(req.Msg.ScmName)
+	if _, err := s.getJob(scmName); err != nil {
+		return nil, invalid(fmt.Errorf("scm: %w", err))
 	}
-	compose := parseCompose(body.Compose)
+	compose := parseCompose(req.Msg.Compose)
 	if len(compose) == 0 {
 		if c, ok := lookup(name); ok {
 			compose = c.Compose
@@ -806,30 +659,28 @@ func (s *server) createApp(w http.ResponseWriter, r *http.Request) {
 			compose = []string{name}
 		}
 	}
-	for _, c := range compose {
-		if !jobName.MatchString(c) {
-			fail(w, 400, fmt.Errorf("bad compose service %s", c))
-			return
+	for _, svc := range compose {
+		if !jobName.MatchString(svc) {
+			return nil, invalid(fmt.Errorf("bad compose service %s", svc))
 		}
 	}
-	_, err := s.db.Exec(
+	res, err := s.db.Exec(
 		`INSERT INTO deploy_app (name, scm_name, compose) VALUES (?,?,?)`,
-		name, strings.TrimSpace(body.ScmName), strings.Join(compose, ","),
+		name, scmName, strings.Join(compose, ","),
 	)
 	if err != nil {
-		fail(w, 400, fmt.Errorf("create deploy: %w", err))
-		return
+		return nil, invalid(fmt.Errorf("create deploy: %w", err))
 	}
-	writeJSON(w, map[string]any{"name": name, "scmName": strings.TrimSpace(body.ScmName), "compose": compose})
+	id, _ := res.LastInsertId()
+	return connect.NewResponse(&v1.App{Id: id, Name: name, ScmName: scmName, Compose: compose}), nil
 }
 
-func (s *server) showApp(w http.ResponseWriter, r *http.Request) {
-	a, err := s.getApp(r.PathValue("name"))
+func (s *server) ShowApp(_ context.Context, req *connect.Request[v1.ShowAppRequest]) (*connect.Response[v1.App], error) {
+	a, err := s.getApp(req.Msg.Name)
 	if err != nil {
-		fail(w, 404, err)
-		return
+		return nil, notFound(err)
 	}
-	writeJSON(w, jsonApp(a, ""))
+	return connect.NewResponse(appProto(a, "")), nil
 }
 
 func (s *server) getApp(name string) (deployApp, error) {
@@ -849,64 +700,84 @@ func (s *server) getApp(name string) (deployApp, error) {
 	return a, nil
 }
 
-func (s *server) listDeploys(w http.ResponseWriter, r *http.Request) {
-	svc := r.URL.Query().Get("service")
+func (s *server) ListDeploys(_ context.Context, req *connect.Request[v1.ListDeploysRequest]) (*connect.Response[v1.ListDeploysResponse], error) {
 	q := `SELECT id, service, version, status, created_at FROM deploy_record`
 	var args []any
-	if svc != "" {
+	if svc := strings.TrimSpace(req.Msg.Service); svc != "" {
 		q += ` WHERE service=?`
 		args = append(args, svc)
 	}
 	q += ` ORDER BY id DESC LIMIT 50`
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	defer rows.Close()
-	writeJSON(w, scanRows(rows, "id", "service", "version", "status", "createdAt"))
+	var out []*v1.Deploy
+	for rows.Next() {
+		d := &v1.Deploy{}
+		var t time.Time
+		if err := rows.Scan(&d.Id, &d.Service, &d.Version, &d.Status, &t); err != nil {
+			return nil, internal(err)
+		}
+		d.CreatedAt = fmtTime(t)
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, internal(err)
+	}
+	return connect.NewResponse(&v1.ListDeploysResponse{Deploys: out}), nil
 }
 
-func (s *server) getDeploy(w http.ResponseWriter, r *http.Request) {
-	var id int64
-	var service, version, status, logText string
-	var created time.Time
-	err := s.db.QueryRow(
-		`SELECT id, service, version, status, log_text, created_at FROM deploy_record WHERE id=?`,
-		r.PathValue("id"),
-	).Scan(&id, &service, &version, &status, &logText, &created)
-	if err == sql.ErrNoRows {
-		fail(w, 404, fmt.Errorf("deploy not found"))
-		return
-	}
+func (s *server) GetDeploy(_ context.Context, req *connect.Request[v1.GetDeployRequest]) (*connect.Response[v1.Deploy], error) {
+	d, err := s.loadDeploy(req.Msg.Id)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, err
 	}
-	writeJSON(w, map[string]any{
-		"id": id, "service": service, "version": version,
-		"status": status, "log": logText, "createdAt": fmtTime(created),
+	return connect.NewResponse(d), nil
+}
+
+func (s *server) WatchDeploy(ctx context.Context, req *connect.Request[v1.WatchDeployRequest], stream *connect.ServerStream[v1.RunEvent]) error {
+	return s.watchLive(ctx, req.Msg.Id, stream, func(id int64) (*v1.Build, error) {
+		d, err := s.loadDeploy(id)
+		if err != nil {
+			return nil, err
+		}
+		return &v1.Build{Id: d.Id, Service: d.Service, Version: d.Version, Status: d.Status, Log: d.Log, CreatedAt: d.CreatedAt, Error: d.Error}, nil
 	})
 }
 
-func (s *server) createDeploy(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Service string `json:"service"`
-		Version string `json:"version"`
+func (s *server) loadDeploy(id int64) (*v1.Deploy, error) {
+	d := &v1.Deploy{}
+	var t time.Time
+	err := s.db.QueryRow(
+		`SELECT id, service, version, status, log_text, created_at FROM deploy_record WHERE id=?`,
+		id,
+	).Scan(&d.Id, &d.Service, &d.Version, &d.Status, &d.Log, &t)
+	if err == sql.ErrNoRows {
+		return nil, notFound(fmt.Errorf("deploy not found"))
 	}
-	if err := readJSON(r, &body); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	app, err := s.getApp(body.Service)
 	if err != nil {
-		fail(w, 400, err)
-		return
+		return nil, internal(err)
 	}
-	ver := strings.TrimSpace(body.Version)
+	d.CreatedAt = fmtTime(t)
+	if v, ok := lives.Load(d.Id); ok {
+		d.Log = v.(*liveRun).String()
+	}
+	if d.Status == "fail" && d.Error == "" {
+		d.Error = "fail"
+	}
+	return d, nil
+}
+
+func (s *server) CreateDeploy(_ context.Context, req *connect.Request[v1.CreateDeployRequest]) (*connect.Response[v1.Deploy], error) {
+	app, err := s.getApp(req.Msg.Service)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	ver := strings.TrimSpace(req.Msg.Version)
 	if ver == "" || strings.Contains(ver, "/") || strings.Contains(ver, "..") {
-		fail(w, 400, fmt.Errorf("bad version"))
-		return
+		return nil, invalid(fmt.Errorf("bad version"))
 	}
 	var st string
 	err = s.db.QueryRow(
@@ -914,125 +785,126 @@ func (s *server) createDeploy(w http.ResponseWriter, r *http.Request) {
 		app.ScmName, ver,
 	).Scan(&st)
 	if err == sql.ErrNoRows {
-		fail(w, 400, fmt.Errorf("no scm artifact %s@%s", app.ScmName, ver))
-		return
+		return nil, invalid(fmt.Errorf("no scm artifact %s@%s", app.ScmName, ver))
 	}
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
 	if st != "ok" {
-		fail(w, 400, fmt.Errorf("scm %s@%s status %s", app.ScmName, ver, st))
-		return
+		return nil, invalid(fmt.Errorf("scm %s@%s status %s", app.ScmName, ver, st))
 	}
 	src := filepath.Join(s.root, "artifacts", app.ScmName, ver, app.ScmName)
 	if _, err := os.Stat(src); err != nil {
-		fail(w, 400, fmt.Errorf("artifact not found: %s", src))
-		return
+		return nil, invalid(fmt.Errorf("artifact not found: %s", src))
 	}
 	job, err := s.getJob(app.ScmName)
 	if err != nil {
-		fail(w, 400, err)
-		return
+		return nil, invalid(err)
 	}
 	label := job.Label
 	if label == "" {
 		label = "golang"
 	}
-
-	lg, err := startSSE(w)
+	res, err := s.db.Exec(
+		`INSERT INTO deploy_record (service, version, status, log_text) VALUES (?,?,?,?)`,
+		app.Name, ver, "running", "",
+	)
 	if err != nil {
-		fail(w, 500, err)
-		return
+		return nil, internal(err)
 	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, internal(err)
+	}
+	live := &liveRun{}
+	lives.Store(id, live)
+	go s.runDeploy(id, app, ver, src, label, live)
+	return connect.NewResponse(&v1.Deploy{Id: id, Service: app.Name, Version: ver, Status: "running"}), nil
+}
+
+func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live *liveRun) {
+	defer lives.Delete(id)
 	imageVer := fmt.Sprintf("minikitex-%s:%s", app.Name, ver)
 	imageLocal := fmt.Sprintf("minikitex-%s:local", app.Name)
 	finish := func(status string, runErr error) {
-		logText := lg.String()
 		if runErr != nil {
-			logText += "\n" + runErr.Error()
+			fmt.Fprintf(live, "%s\n", runErr)
 		}
-		if _, dbErr := s.db.Exec(
-			`INSERT INTO deploy_record (service, version, status, log_text) VALUES (?,?,?,?)`,
-			app.Name, ver, status, logText,
-		); dbErr != nil {
-			fmt.Fprintf(lg, "save deploy: %s\n", dbErr)
-			if runErr == nil {
-				runErr = dbErr
-				status = "fail"
-			}
-		}
-		out := map[string]any{"status": status, "service": app.Name, "version": ver, "image": imageVer}
+		_, _ = s.db.Exec(`UPDATE deploy_record SET status=?, log_text=? WHERE id=?`, status, live.String(), id)
+		out := map[string]any{"status": status, "service": app.Name, "version": ver, "image": imageVer, "id": id}
 		if runErr != nil {
 			out["error"] = runErr.Error()
 		}
-		lg.done(out)
+		live.finish(out)
 	}
-
-	fmt.Fprintf(lg, "$ docker build -t %s -t %s  label=%s\n", imageVer, imageLocal, label)
+	fmt.Fprintf(live, "$ docker build -t %s -t %s  label=%s\n", imageVer, imageLocal, label)
 	if label == "node" {
-		if err := s.buildNodeImage(lg, src, imageVer, imageLocal); err != nil {
-			fmt.Fprintf(lg, "%s\n", err)
+		if err := s.buildNodeImage(live, src, imageVer, imageLocal); err != nil {
+			finish("fail", err)
+			return
+		}
+	} else if label == "python" {
+		if err := s.buildPythonImage(live, src, imageVer, imageLocal); err != nil {
 			finish("fail", err)
 			return
 		}
 	} else {
-		if label == "python" {
-			if err := s.buildPythonImage(lg, src, imageVer, imageLocal); err != nil {
-				fmt.Fprintf(lg, "%s\n", err)
-				finish("fail", err)
-				return
-			}
-		} else {
-			fmt.Fprintf(lg, "(context %s)\n", filepath.Dir(src))
-			cmd := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, "-f", "-", filepath.Dir(src))
-			cmd.Stdin = strings.NewReader(fmt.Sprintf("FROM scratch\nCOPY %s /app\nENTRYPOINT [\"/app\"]\n", filepath.Base(src)))
-			cmd.Stdout = lg
-			cmd.Stderr = lg
-			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(lg, "%s\n", err)
-				finish("fail", err)
-				return
-			}
+		fmt.Fprintf(live, "(context %s)\n", filepath.Dir(src))
+		cmd := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, "-f", "-", filepath.Dir(src))
+		cmd.Stdin = strings.NewReader(fmt.Sprintf("FROM scratch\nCOPY %s /app\nENTRYPOINT [\"/app\"]\n", filepath.Base(src)))
+		cmd.Stdout = live
+		cmd.Stderr = live
+		if err := cmd.Run(); err != nil {
+			finish("fail", err)
+			return
 		}
 	}
-
 	if err := s.syncRuntimeCompose(); err != nil {
-		fmt.Fprintf(lg, "runtime compose: %s\n", err)
 		finish("fail", err)
 		return
 	}
-
 	upArgs := append([]string{"up", "--no-deps", "--force-recreate", "-d"}, app.Compose...)
-	fmt.Fprintf(lg, "$ docker compose up --no-deps --force-recreate -d %s\n", strings.Join(app.Compose, " "))
-	if err := s.composeTo(lg, upArgs...); err != nil {
-		fmt.Fprintf(lg, "%s\n", err)
+	fmt.Fprintf(live, "$ docker compose up --no-deps --force-recreate -d %s\n", strings.Join(app.Compose, " "))
+	if err := s.composeTo(live, upArgs...); err != nil {
 		finish("fail", err)
 		return
 	}
 	finish("ok", nil)
 }
 
-func (s *server) runtime(w http.ResponseWriter, _ *http.Request) {
+func (s *server) Runtime(context.Context, *connect.Request[v1.RuntimeRequest]) (*connect.Response[v1.RuntimeResponse], error) {
 	out, err := s.compose("ps", "--format", "json")
 	if err != nil {
-		fail(w, 500, fmt.Errorf("%w\n%s", err, out))
-		return
+		return nil, internal(fmt.Errorf("%w\n%s", err, out))
 	}
 	dec := json.NewDecoder(strings.NewReader(out))
-	var items []any
+	var items []*v1.Container
 	for {
-		var one any
+		var one map[string]any
 		if err := dec.Decode(&one); err != nil {
 			if err == io.EOF {
 				break
 			}
-			fail(w, 500, err)
-			return
+			return nil, internal(err)
 		}
-		items = append(items, one)
+		str := func(keys ...string) string {
+			for _, k := range keys {
+				if v, ok := one[k]; ok && v != nil {
+					return fmt.Sprint(v)
+				}
+			}
+			return ""
+		}
+		items = append(items, &v1.Container{
+			Id:      str("ID", "Id"),
+			Name:    str("Name"),
+			Service: str("Service"),
+			Image:   str("Image"),
+			Status:  str("Status"),
+			State:   str("State"),
+		})
 	}
-	writeJSON(w, items)
+	return connect.NewResponse(&v1.RuntimeResponse{Containers: items}), nil
 }
 
 func (s *server) composeCmd(args ...string) *exec.Cmd {
@@ -1234,43 +1106,8 @@ func dockerArch() string {
 	return "amd64"
 }
 
-func scanRows(rows interface {
-	Next() bool
-	Scan(...any) error
-	Err() error
-}, keys ...string) []map[string]any {
-	var out []map[string]any
-	for rows.Next() {
-		vals := make([]any, len(keys))
-		ptrs := make([]any, len(keys))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			continue
-		}
-		row := map[string]any{}
-		for i, k := range keys {
-			row[k] = stringify(vals[i])
-		}
-		out = append(out, row)
-	}
-	return out
-}
-
 func fmtTime(t time.Time) string {
 	return t.In(time.Local).Format("2006-01-02 15:04:05")
-}
-
-func stringify(v any) any {
-	switch x := v.(type) {
-	case []byte:
-		return string(x)
-	case time.Time:
-		return fmtTime(x)
-	default:
-		return x
-	}
 }
 
 func errStr(err error) string {
