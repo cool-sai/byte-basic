@@ -76,6 +76,24 @@ const (
 	PlatformServiceGetIdlProcedure = "/platform.v1.PlatformService/GetIdl"
 	// PlatformServiceSaveIdlProcedure is the fully-qualified name of the PlatformService's SaveIdl RPC.
 	PlatformServiceSaveIdlProcedure = "/platform.v1.PlatformService/SaveIdl"
+	// PlatformServiceListBamModulesProcedure is the fully-qualified name of the PlatformService's
+	// ListBamModules RPC.
+	PlatformServiceListBamModulesProcedure = "/platform.v1.PlatformService/ListBamModules"
+	// PlatformServiceCreateBamModuleProcedure is the fully-qualified name of the PlatformService's
+	// CreateBamModule RPC.
+	PlatformServiceCreateBamModuleProcedure = "/platform.v1.PlatformService/CreateBamModule"
+	// PlatformServiceGetBamModuleProcedure is the fully-qualified name of the PlatformService's
+	// GetBamModule RPC.
+	PlatformServiceGetBamModuleProcedure = "/platform.v1.PlatformService/GetBamModule"
+	// PlatformServiceSaveBamModuleProcedure is the fully-qualified name of the PlatformService's
+	// SaveBamModule RPC.
+	PlatformServiceSaveBamModuleProcedure = "/platform.v1.PlatformService/SaveBamModule"
+	// PlatformServiceGenerateBamProcedure is the fully-qualified name of the PlatformService's
+	// GenerateBam RPC.
+	PlatformServiceGenerateBamProcedure = "/platform.v1.PlatformService/GenerateBam"
+	// PlatformServiceDownloadBamProcedure is the fully-qualified name of the PlatformService's
+	// DownloadBam RPC.
+	PlatformServiceDownloadBamProcedure = "/platform.v1.PlatformService/DownloadBam"
 	// PlatformServiceListPublishesProcedure is the fully-qualified name of the PlatformService's
 	// ListPublishes RPC.
 	PlatformServiceListPublishesProcedure = "/platform.v1.PlatformService/ListPublishes"
@@ -157,6 +175,12 @@ type PlatformServiceClient interface {
 	ListIdls(context.Context, *connect.Request[v1.ListIdlsRequest]) (*connect.Response[v1.ListIdlsResponse], error)
 	GetIdl(context.Context, *connect.Request[v1.GetIdlRequest]) (*connect.Response[v1.Idl], error)
 	SaveIdl(context.Context, *connect.Request[v1.SaveIdlRequest]) (*connect.Response[v1.Idl], error)
+	ListBamModules(context.Context, *connect.Request[v1.ListBamModulesRequest]) (*connect.Response[v1.ListBamModulesResponse], error)
+	CreateBamModule(context.Context, *connect.Request[v1.CreateBamModuleRequest]) (*connect.Response[v1.BamModule], error)
+	GetBamModule(context.Context, *connect.Request[v1.GetBamModuleRequest]) (*connect.Response[v1.BamModuleDetail], error)
+	SaveBamModule(context.Context, *connect.Request[v1.SaveBamModuleRequest]) (*connect.Response[v1.BamModuleDetail], error)
+	GenerateBam(context.Context, *connect.Request[v1.GenerateBamRequest]) (*connect.Response[v1.BamGenerateResponse], error)
+	DownloadBam(context.Context, *connect.Request[v1.DownloadBamRequest]) (*connect.Response[v1.BamDownloadResponse], error)
 	ListPublishes(context.Context, *connect.Request[v1.ListPublishesRequest]) (*connect.Response[v1.ListPublishesResponse], error)
 	PublishAgw(context.Context, *connect.Request[v1.PublishAgwRequest]) (*connect.Response[v1.PublishAgwResponse], error)
 	ListApps(context.Context, *connect.Request[v1.ListAppsRequest]) (*connect.Response[v1.ListAppsResponse], error)
@@ -285,6 +309,42 @@ func NewPlatformServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			httpClient,
 			baseURL+PlatformServiceSaveIdlProcedure,
 			connect.WithSchema(platformServiceMethods.ByName("SaveIdl")),
+			connect.WithClientOptions(opts...),
+		),
+		listBamModules: connect.NewClient[v1.ListBamModulesRequest, v1.ListBamModulesResponse](
+			httpClient,
+			baseURL+PlatformServiceListBamModulesProcedure,
+			connect.WithSchema(platformServiceMethods.ByName("ListBamModules")),
+			connect.WithClientOptions(opts...),
+		),
+		createBamModule: connect.NewClient[v1.CreateBamModuleRequest, v1.BamModule](
+			httpClient,
+			baseURL+PlatformServiceCreateBamModuleProcedure,
+			connect.WithSchema(platformServiceMethods.ByName("CreateBamModule")),
+			connect.WithClientOptions(opts...),
+		),
+		getBamModule: connect.NewClient[v1.GetBamModuleRequest, v1.BamModuleDetail](
+			httpClient,
+			baseURL+PlatformServiceGetBamModuleProcedure,
+			connect.WithSchema(platformServiceMethods.ByName("GetBamModule")),
+			connect.WithClientOptions(opts...),
+		),
+		saveBamModule: connect.NewClient[v1.SaveBamModuleRequest, v1.BamModuleDetail](
+			httpClient,
+			baseURL+PlatformServiceSaveBamModuleProcedure,
+			connect.WithSchema(platformServiceMethods.ByName("SaveBamModule")),
+			connect.WithClientOptions(opts...),
+		),
+		generateBam: connect.NewClient[v1.GenerateBamRequest, v1.BamGenerateResponse](
+			httpClient,
+			baseURL+PlatformServiceGenerateBamProcedure,
+			connect.WithSchema(platformServiceMethods.ByName("GenerateBam")),
+			connect.WithClientOptions(opts...),
+		),
+		downloadBam: connect.NewClient[v1.DownloadBamRequest, v1.BamDownloadResponse](
+			httpClient,
+			baseURL+PlatformServiceDownloadBamProcedure,
+			connect.WithSchema(platformServiceMethods.ByName("DownloadBam")),
 			connect.WithClientOptions(opts...),
 		),
 		listPublishes: connect.NewClient[v1.ListPublishesRequest, v1.ListPublishesResponse](
@@ -434,6 +494,12 @@ type platformServiceClient struct {
 	listIdls         *connect.Client[v1.ListIdlsRequest, v1.ListIdlsResponse]
 	getIdl           *connect.Client[v1.GetIdlRequest, v1.Idl]
 	saveIdl          *connect.Client[v1.SaveIdlRequest, v1.Idl]
+	listBamModules   *connect.Client[v1.ListBamModulesRequest, v1.ListBamModulesResponse]
+	createBamModule  *connect.Client[v1.CreateBamModuleRequest, v1.BamModule]
+	getBamModule     *connect.Client[v1.GetBamModuleRequest, v1.BamModuleDetail]
+	saveBamModule    *connect.Client[v1.SaveBamModuleRequest, v1.BamModuleDetail]
+	generateBam      *connect.Client[v1.GenerateBamRequest, v1.BamGenerateResponse]
+	downloadBam      *connect.Client[v1.DownloadBamRequest, v1.BamDownloadResponse]
 	listPublishes    *connect.Client[v1.ListPublishesRequest, v1.ListPublishesResponse]
 	publishAgw       *connect.Client[v1.PublishAgwRequest, v1.PublishAgwResponse]
 	listApps         *connect.Client[v1.ListAppsRequest, v1.ListAppsResponse]
@@ -535,6 +601,36 @@ func (c *platformServiceClient) GetIdl(ctx context.Context, req *connect.Request
 // SaveIdl calls platform.v1.PlatformService.SaveIdl.
 func (c *platformServiceClient) SaveIdl(ctx context.Context, req *connect.Request[v1.SaveIdlRequest]) (*connect.Response[v1.Idl], error) {
 	return c.saveIdl.CallUnary(ctx, req)
+}
+
+// ListBamModules calls platform.v1.PlatformService.ListBamModules.
+func (c *platformServiceClient) ListBamModules(ctx context.Context, req *connect.Request[v1.ListBamModulesRequest]) (*connect.Response[v1.ListBamModulesResponse], error) {
+	return c.listBamModules.CallUnary(ctx, req)
+}
+
+// CreateBamModule calls platform.v1.PlatformService.CreateBamModule.
+func (c *platformServiceClient) CreateBamModule(ctx context.Context, req *connect.Request[v1.CreateBamModuleRequest]) (*connect.Response[v1.BamModule], error) {
+	return c.createBamModule.CallUnary(ctx, req)
+}
+
+// GetBamModule calls platform.v1.PlatformService.GetBamModule.
+func (c *platformServiceClient) GetBamModule(ctx context.Context, req *connect.Request[v1.GetBamModuleRequest]) (*connect.Response[v1.BamModuleDetail], error) {
+	return c.getBamModule.CallUnary(ctx, req)
+}
+
+// SaveBamModule calls platform.v1.PlatformService.SaveBamModule.
+func (c *platformServiceClient) SaveBamModule(ctx context.Context, req *connect.Request[v1.SaveBamModuleRequest]) (*connect.Response[v1.BamModuleDetail], error) {
+	return c.saveBamModule.CallUnary(ctx, req)
+}
+
+// GenerateBam calls platform.v1.PlatformService.GenerateBam.
+func (c *platformServiceClient) GenerateBam(ctx context.Context, req *connect.Request[v1.GenerateBamRequest]) (*connect.Response[v1.BamGenerateResponse], error) {
+	return c.generateBam.CallUnary(ctx, req)
+}
+
+// DownloadBam calls platform.v1.PlatformService.DownloadBam.
+func (c *platformServiceClient) DownloadBam(ctx context.Context, req *connect.Request[v1.DownloadBamRequest]) (*connect.Response[v1.BamDownloadResponse], error) {
+	return c.downloadBam.CallUnary(ctx, req)
 }
 
 // ListPublishes calls platform.v1.PlatformService.ListPublishes.
@@ -660,6 +756,12 @@ type PlatformServiceHandler interface {
 	ListIdls(context.Context, *connect.Request[v1.ListIdlsRequest]) (*connect.Response[v1.ListIdlsResponse], error)
 	GetIdl(context.Context, *connect.Request[v1.GetIdlRequest]) (*connect.Response[v1.Idl], error)
 	SaveIdl(context.Context, *connect.Request[v1.SaveIdlRequest]) (*connect.Response[v1.Idl], error)
+	ListBamModules(context.Context, *connect.Request[v1.ListBamModulesRequest]) (*connect.Response[v1.ListBamModulesResponse], error)
+	CreateBamModule(context.Context, *connect.Request[v1.CreateBamModuleRequest]) (*connect.Response[v1.BamModule], error)
+	GetBamModule(context.Context, *connect.Request[v1.GetBamModuleRequest]) (*connect.Response[v1.BamModuleDetail], error)
+	SaveBamModule(context.Context, *connect.Request[v1.SaveBamModuleRequest]) (*connect.Response[v1.BamModuleDetail], error)
+	GenerateBam(context.Context, *connect.Request[v1.GenerateBamRequest]) (*connect.Response[v1.BamGenerateResponse], error)
+	DownloadBam(context.Context, *connect.Request[v1.DownloadBamRequest]) (*connect.Response[v1.BamDownloadResponse], error)
 	ListPublishes(context.Context, *connect.Request[v1.ListPublishesRequest]) (*connect.Response[v1.ListPublishesResponse], error)
 	PublishAgw(context.Context, *connect.Request[v1.PublishAgwRequest]) (*connect.Response[v1.PublishAgwResponse], error)
 	ListApps(context.Context, *connect.Request[v1.ListAppsRequest]) (*connect.Response[v1.ListAppsResponse], error)
@@ -784,6 +886,42 @@ func NewPlatformServiceHandler(svc PlatformServiceHandler, opts ...connect.Handl
 		PlatformServiceSaveIdlProcedure,
 		svc.SaveIdl,
 		connect.WithSchema(platformServiceMethods.ByName("SaveIdl")),
+		connect.WithHandlerOptions(opts...),
+	)
+	platformServiceListBamModulesHandler := connect.NewUnaryHandler(
+		PlatformServiceListBamModulesProcedure,
+		svc.ListBamModules,
+		connect.WithSchema(platformServiceMethods.ByName("ListBamModules")),
+		connect.WithHandlerOptions(opts...),
+	)
+	platformServiceCreateBamModuleHandler := connect.NewUnaryHandler(
+		PlatformServiceCreateBamModuleProcedure,
+		svc.CreateBamModule,
+		connect.WithSchema(platformServiceMethods.ByName("CreateBamModule")),
+		connect.WithHandlerOptions(opts...),
+	)
+	platformServiceGetBamModuleHandler := connect.NewUnaryHandler(
+		PlatformServiceGetBamModuleProcedure,
+		svc.GetBamModule,
+		connect.WithSchema(platformServiceMethods.ByName("GetBamModule")),
+		connect.WithHandlerOptions(opts...),
+	)
+	platformServiceSaveBamModuleHandler := connect.NewUnaryHandler(
+		PlatformServiceSaveBamModuleProcedure,
+		svc.SaveBamModule,
+		connect.WithSchema(platformServiceMethods.ByName("SaveBamModule")),
+		connect.WithHandlerOptions(opts...),
+	)
+	platformServiceGenerateBamHandler := connect.NewUnaryHandler(
+		PlatformServiceGenerateBamProcedure,
+		svc.GenerateBam,
+		connect.WithSchema(platformServiceMethods.ByName("GenerateBam")),
+		connect.WithHandlerOptions(opts...),
+	)
+	platformServiceDownloadBamHandler := connect.NewUnaryHandler(
+		PlatformServiceDownloadBamProcedure,
+		svc.DownloadBam,
+		connect.WithSchema(platformServiceMethods.ByName("DownloadBam")),
 		connect.WithHandlerOptions(opts...),
 	)
 	platformServiceListPublishesHandler := connect.NewUnaryHandler(
@@ -946,6 +1084,18 @@ func NewPlatformServiceHandler(svc PlatformServiceHandler, opts ...connect.Handl
 			platformServiceGetIdlHandler.ServeHTTP(w, r)
 		case PlatformServiceSaveIdlProcedure:
 			platformServiceSaveIdlHandler.ServeHTTP(w, r)
+		case PlatformServiceListBamModulesProcedure:
+			platformServiceListBamModulesHandler.ServeHTTP(w, r)
+		case PlatformServiceCreateBamModuleProcedure:
+			platformServiceCreateBamModuleHandler.ServeHTTP(w, r)
+		case PlatformServiceGetBamModuleProcedure:
+			platformServiceGetBamModuleHandler.ServeHTTP(w, r)
+		case PlatformServiceSaveBamModuleProcedure:
+			platformServiceSaveBamModuleHandler.ServeHTTP(w, r)
+		case PlatformServiceGenerateBamProcedure:
+			platformServiceGenerateBamHandler.ServeHTTP(w, r)
+		case PlatformServiceDownloadBamProcedure:
+			platformServiceDownloadBamHandler.ServeHTTP(w, r)
 		case PlatformServiceListPublishesProcedure:
 			platformServiceListPublishesHandler.ServeHTTP(w, r)
 		case PlatformServicePublishAgwProcedure:
@@ -1059,6 +1209,30 @@ func (UnimplementedPlatformServiceHandler) GetIdl(context.Context, *connect.Requ
 
 func (UnimplementedPlatformServiceHandler) SaveIdl(context.Context, *connect.Request[v1.SaveIdlRequest]) (*connect.Response[v1.Idl], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.SaveIdl is not implemented"))
+}
+
+func (UnimplementedPlatformServiceHandler) ListBamModules(context.Context, *connect.Request[v1.ListBamModulesRequest]) (*connect.Response[v1.ListBamModulesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.ListBamModules is not implemented"))
+}
+
+func (UnimplementedPlatformServiceHandler) CreateBamModule(context.Context, *connect.Request[v1.CreateBamModuleRequest]) (*connect.Response[v1.BamModule], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.CreateBamModule is not implemented"))
+}
+
+func (UnimplementedPlatformServiceHandler) GetBamModule(context.Context, *connect.Request[v1.GetBamModuleRequest]) (*connect.Response[v1.BamModuleDetail], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.GetBamModule is not implemented"))
+}
+
+func (UnimplementedPlatformServiceHandler) SaveBamModule(context.Context, *connect.Request[v1.SaveBamModuleRequest]) (*connect.Response[v1.BamModuleDetail], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.SaveBamModule is not implemented"))
+}
+
+func (UnimplementedPlatformServiceHandler) GenerateBam(context.Context, *connect.Request[v1.GenerateBamRequest]) (*connect.Response[v1.BamGenerateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.GenerateBam is not implemented"))
+}
+
+func (UnimplementedPlatformServiceHandler) DownloadBam(context.Context, *connect.Request[v1.DownloadBamRequest]) (*connect.Response[v1.BamDownloadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.DownloadBam is not implemented"))
 }
 
 func (UnimplementedPlatformServiceHandler) ListPublishes(context.Context, *connect.Request[v1.ListPublishesRequest]) (*connect.Response[v1.ListPublishesResponse], error) {

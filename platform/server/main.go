@@ -51,6 +51,9 @@ func main() {
 		log.Fatal(err)
 	}
 	s := &server{root: root, db: db}
+	if err := s.seedBam(); err != nil {
+		log.Fatal(err)
+	}
 	addr := getenv("LISTEN", "127.0.0.1:8081")
 	log.Fatal(s.serveHTTP(addr))
 }
@@ -152,7 +155,56 @@ func migrate(db *sql.DB) error {
 	if err := seedAdmin(db); err != nil {
 		return err
 	}
-	return seedTlb(db)
+	if err := seedTlb(db); err != nil {
+		return err
+	}
+	for _, q := range []string{
+		`CREATE TABLE IF NOT EXISTS bam_module (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			name VARCHAR(64) NOT NULL UNIQUE,
+			version INT NOT NULL DEFAULT 0,
+			rpcs INT NOT NULL DEFAULT 0,
+			http_apis INT NOT NULL DEFAULT 0,
+			scm_name VARCHAR(64) NOT NULL DEFAULT '',
+			branch VARCHAR(255) NOT NULL DEFAULT '',
+			proto_dir VARCHAR(255) NOT NULL DEFAULT '',
+			git_commit VARCHAR(64) NOT NULL DEFAULT '',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS bam_file (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			module_id BIGINT NOT NULL,
+			version INT NOT NULL,
+			path VARCHAR(255) NOT NULL,
+			content MEDIUMTEXT NOT NULL,
+			UNIQUE KEY bam_file_ver (module_id, version, path)
+		)`,
+		`CREATE TABLE IF NOT EXISTS bam_gen (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			module_id BIGINT NOT NULL,
+			version INT NOT NULL,
+			status VARCHAR(32) NOT NULL,
+			log_text MEDIUMTEXT,
+			artifact_dir VARCHAR(512) NOT NULL DEFAULT '',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE KEY bam_gen_ver (module_id, version)
+		)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			return err
+		}
+	}
+	for _, q := range []string{
+		`ALTER TABLE bam_module ADD COLUMN scm_name VARCHAR(64) NOT NULL DEFAULT ''`,
+		`ALTER TABLE bam_module ADD COLUMN branch VARCHAR(255) NOT NULL DEFAULT ''`,
+		`ALTER TABLE bam_module ADD COLUMN proto_dir VARCHAR(255) NOT NULL DEFAULT ''`,
+		`ALTER TABLE bam_module ADD COLUMN git_commit VARCHAR(64) NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.Exec(q); err != nil && !skipAlter(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func dupColumn(err error) bool {

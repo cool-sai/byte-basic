@@ -13,18 +13,25 @@ RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories
  && apk add --no-cache go git ca-certificates
 WORKDIR /src
 ENV GOPROXY=https://goproxy.cn,direct
+ENV GOPATH=/go
+ENV PATH=/go/bin:$PATH
 COPY go.mod go.sum ./
 RUN go mod download
 COPY gen ./gen
 COPY idl ./idl
 COPY platform/server ./platform/server
 RUN CGO_ENABLED=0 go build -o /usr/local/bin/platform ./platform/server
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2 \
+ && go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.18.1 \
+ && go install github.com/bufbuild/buf/cmd/buf@v1.47.2
 
 FROM alpine:3.20
 RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
  && apk add --no-cache git go nodejs npm docker-cli docker-cli-compose ca-certificates tzdata
 COPY --from=api /usr/local/bin/platform /usr/local/bin/platform
+COPY --from=api /go/bin/ /usr/local/bin/
 COPY --from=web /web/dist /web
+RUN npm install --prefix /opt/buf-es @bufbuild/protoc-gen-es@2.13.0 --registry=https://registry.npmmirror.com --fetch-retries=8
 WORKDIR /work
 ENV WEB_DIR=/web
 ENV TZ=Asia/Shanghai

@@ -74,6 +74,53 @@ export type IdlView = {
   parseError?: string;
 };
 
+export type BamField = {
+  id: number;
+  type: string;
+  name: string;
+  comment?: string;
+};
+
+export type BamRpc = {
+  service: string;
+  name: string;
+  req: string;
+  resp: string;
+  httpMethod: string;
+  uri: string;
+  comment?: string;
+  stream?: boolean;
+  reqFields?: BamField[] | null;
+  respFields?: BamField[] | null;
+};
+
+export type BamFile = {
+  path: string;
+  content: string;
+};
+
+export type BamModule = {
+  id: number;
+  name: string;
+  version: number;
+  rpcs: number;
+  httpApis: number;
+  createdAt: string;
+  scmName?: string;
+  branch?: string;
+  protoDir?: string;
+  gitCommit?: string;
+};
+
+export type BamModuleDetail = {
+  module: BamModule;
+  files: BamFile[];
+  rpcs: BamRpc[];
+  parseError?: string;
+  genStatus?: string;
+  genDir?: string;
+};
+
 export type Publish = {
   id: number;
   idlName: string;
@@ -229,6 +276,87 @@ function build(b: ProtoBuild): Build {
   };
 }
 
+function bamMod(m: {
+  id: bigint;
+  name: string;
+  version: number;
+  httpApis: number;
+  rpcs: number;
+  createdAt: string;
+  scmName?: string;
+  branch?: string;
+  protoDir?: string;
+  gitCommit?: string;
+}): BamModule {
+  return {
+    id: num(m.id),
+    name: m.name,
+    version: m.version,
+    rpcs: m.rpcs,
+    httpApis: m.httpApis,
+    createdAt: m.createdAt,
+    scmName: m.scmName || undefined,
+    branch: m.branch || undefined,
+    protoDir: m.protoDir || undefined,
+    gitCommit: m.gitCommit || undefined,
+  };
+}
+
+function bamDetail(d: {
+  module?: {
+    id: bigint;
+    name: string;
+    version: number;
+    httpApis: number;
+    rpcs: number;
+    createdAt: string;
+    scmName?: string;
+    branch?: string;
+    protoDir?: string;
+    gitCommit?: string;
+  };
+  files: BamFile[];
+  rpcs: Array<{
+    service: string;
+    name: string;
+    req: string;
+    resp: string;
+    httpMethod: string;
+    uri: string;
+    comment: string;
+    stream: boolean;
+    reqFields: Array<{ id: number; type: string; name: string; comment: string }>;
+    respFields: Array<{ id: number; type: string; name: string; comment: string }>;
+  }>;
+  parseError: string;
+  genStatus: string;
+  genDir: string;
+}): BamModuleDetail {
+  const m = d.module;
+  if (!m) {
+    throw new Error("empty module");
+  }
+  return {
+    module: bamMod(m),
+    files: d.files.map((f) => ({ path: f.path, content: f.content })),
+    parseError: d.parseError || undefined,
+    genStatus: d.genStatus || undefined,
+    genDir: d.genDir || undefined,
+    rpcs: d.rpcs.map((r) => ({
+      service: r.service,
+      name: r.name,
+      req: r.req,
+      resp: r.resp,
+      httpMethod: r.httpMethod,
+      uri: r.uri,
+      comment: r.comment || undefined,
+      stream: r.stream,
+      reqFields: r.reqFields.map((f) => ({ id: f.id, type: f.type, name: f.name, comment: f.comment || undefined })),
+      respFields: r.respFields.map((f) => ({ id: f.id, type: f.type, name: f.name, comment: f.comment || undefined })),
+    })),
+  };
+}
+
 function idl(v: ProtoIdl): IdlView {
   return {
     name: v.name,
@@ -317,6 +445,29 @@ export const api = {
   idls: () => client.listIdls({}).then((r) => r.idls.map(idl)),
   idl: (name: string) => client.getIdl({ name }).then(idl),
   saveIdl: (name: string, content: string) => client.saveIdl({ name, content }).then(idl),
+  bamModules: () => client.listBamModules({}).then((r) => r.modules.map(bamMod)),
+  bamModule: (name: string) => client.getBamModule({ name }).then(bamDetail),
+  createBamModule: (name: string, scmName: string, protoDir: string, branch?: string) =>
+    client.createBamModule({ name, scmName, protoDir, branch: branch || "" }).then(bamMod),
+  generateBam: (name: string) =>
+    client.generateBam({ name }).then((r) => ({
+      version: r.version,
+      status: r.status,
+      log: r.log,
+      dir: r.dir,
+      files: r.files,
+    })),
+  downloadBam: async (name: string, version?: number) => {
+    const r = await client.downloadBam(version ? { name, version } : { name });
+    const zip = r.zip;
+    const buf = zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength) as ArrayBuffer;
+    const blob = new Blob([buf], { type: "application/zip" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = r.filename || name + ".zip";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
   publishes: () =>
     client.listPublishes({}).then((r) =>
       r.publishes.map((p) => ({

@@ -6,6 +6,8 @@ import JobList from "./pages/scm/JobList";
 import JobPage from "./pages/scm/JobPage";
 import BuildPage from "./pages/scm/BuildPage";
 import BAM from "./pages/BAM";
+import ModuleList from "./pages/bam/ModuleList";
+import ModulePage from "./pages/bam/ModulePage";
 import AGW from "./pages/AGW";
 import TLB from "./pages/TLB";
 import SiteList from "./pages/tlb/SiteList";
@@ -81,7 +83,10 @@ export default function App() {
             <Route path=":name" element={<JobPage />} />
             <Route path=":name/builds/:id" element={<BuildPage />} />
           </Route>
-          <Route path="/bam" element={<BAM />} />
+          <Route path="/bam" element={<BAM />}>
+            <Route index element={<ModuleList />} />
+            <Route path=":name" element={<ModulePage />} />
+          </Route>
           <Route path="/agw" element={<AGW />} />
           <Route path="/tlb" element={<TLB />}>
             <Route index element={<SiteList />} />

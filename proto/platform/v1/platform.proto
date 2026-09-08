@@ -58,6 +58,26 @@ service PlatformService {
   rpc SaveIdl(SaveIdlRequest) returns (Idl) {
     option (google.api.http) = { put: "/api/bam/idls/{name}" body: "*" };
   }
+
+  rpc ListBamModules(ListBamModulesRequest) returns (ListBamModulesResponse) {
+    option (google.api.http) = { get: "/api/bam/modules" };
+  }
+  rpc CreateBamModule(CreateBamModuleRequest) returns (BamModule) {
+    option (google.api.http) = { post: "/api/bam/modules" body: "*" };
+  }
+  rpc GetBamModule(GetBamModuleRequest) returns (BamModuleDetail) {
+    option (google.api.http) = { get: "/api/bam/modules/{name}" };
+  }
+  rpc SaveBamModule(SaveBamModuleRequest) returns (BamModuleDetail) {
+    option (google.api.http) = { put: "/api/bam/modules/{name}" body: "*" };
+  }
+  rpc GenerateBam(GenerateBamRequest) returns (BamGenerateResponse) {
+    option (google.api.http) = { post: "/api/bam/modules/{name}/generate" body: "*" };
+  }
+  rpc DownloadBam(DownloadBamRequest) returns (BamDownloadResponse) {
+    option (google.api.http) = { get: "/api/bam/modules/{name}/download" };
+  }
+
   rpc ListPublishes(ListPublishesRequest) returns (ListPublishesResponse) {
     option (google.api.http) = { get: "/api/agw/publishes" };
   }
@@ -265,6 +285,84 @@ message GetIdlRequest {
 message SaveIdlRequest {
   string name = 1;
   string content = 2;
+}
+
+message BamFile {
+  string path = 1;
+  string content = 2;
+}
+message BamField {
+  int32 id = 1;
+  string type = 2;
+  string name = 3;
+  string comment = 4;
+}
+message BamRpc {
+  string service = 1;
+  string name = 2;
+  string req = 3;
+  string resp = 4;
+  string http_method = 5;
+  string uri = 6;
+  string comment = 7;
+  bool stream = 8;
+  repeated BamField req_fields = 9;
+  repeated BamField resp_fields = 10;
+}
+message BamModule {
+  int64 id = 1;
+  string name = 2;
+  int32 version = 3;
+  int32 rpcs = 4;
+  int32 http_apis = 5;
+  string created_at = 6;
+  string scm_name = 7;
+  string branch = 8;
+  string proto_dir = 9;
+  string git_commit = 10;
+}
+message BamModuleDetail {
+  BamModule module = 1;
+  repeated BamFile files = 2;
+  repeated BamRpc rpcs = 3;
+  string parse_error = 4;
+  string gen_status = 5;
+  string gen_dir = 6;
+}
+message ListBamModulesRequest {}
+message ListBamModulesResponse {
+  repeated BamModule modules = 1;
+}
+message CreateBamModuleRequest {
+  string name = 1;
+  string scm_name = 2;
+  string proto_dir = 3;
+  string branch = 4;
+}
+message GetBamModuleRequest {
+  string name = 1;
+}
+message SaveBamModuleRequest {
+  string name = 1;
+  repeated BamFile files = 2;
+}
+message GenerateBamRequest {
+  string name = 1;
+}
+message BamGenerateResponse {
+  int32 version = 1;
+  string status = 2;
+  string log = 3;
+  string dir = 4;
+  repeated string files = 5;
+}
+message DownloadBamRequest {
+  string name = 1;
+  int32 version = 2;
+}
+message BamDownloadResponse {
+  string filename = 1;
+  bytes zip = 2;
 }
 
 message Publish {

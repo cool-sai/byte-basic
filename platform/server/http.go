@@ -25,12 +25,21 @@ func (s *server) serveHTTP(addr string) error {
 	if err != nil {
 		return err
 	}
-	var h http.Handler = transcoder
+	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if _, ok := bamZipName(r.URL.Path); ok {
+				s.handleBamZip(w, r)
+				return
+			}
+		}
+		transcoder.ServeHTTP(w, r)
+	})
+	var h http.Handler = api
 	if dir := strings.TrimSpace(os.Getenv("WEB_DIR")); dir != "" {
 		fs := http.FileServer(http.Dir(dir))
 		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/platform.v1.") {
-				transcoder.ServeHTTP(w, r)
+				api.ServeHTTP(w, r)
 				return
 			}
 			fs.ServeHTTP(w, r)
@@ -67,7 +76,8 @@ func (authInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) c
 }
 
 func withUser(ctx context.Context, procedure, authz string) (context.Context, error) {
-	if procedure == platformv1connect.PlatformServiceLoginProcedure {
+	if procedure == platformv1connect.PlatformServiceLoginProcedure ||
+		procedure == platformv1connect.PlatformServiceDownloadBamProcedure {
 		return ctx, nil
 	}
 	user, err := parseToken(authz)
