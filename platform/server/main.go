@@ -189,6 +189,22 @@ func migrate(db *sql.DB) error {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE KEY bam_gen_ver (module_id, version)
 		)`,
+		`CREATE TABLE IF NOT EXISTS bam_rev (
+			module_id BIGINT NOT NULL,
+			version INT NOT NULL,
+			branch VARCHAR(255) NOT NULL DEFAULT '',
+			git_commit VARCHAR(64) NOT NULL DEFAULT '',
+			rpcs INT NOT NULL DEFAULT 0,
+			http_apis INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE KEY bam_rev_ver (module_id, version)
+		)`,
+		`CREATE TABLE IF NOT EXISTS bam_git_ref (
+			scm_name VARCHAR(64) NOT NULL,
+			branch VARCHAR(255) NOT NULL,
+			git_commit VARCHAR(64) NOT NULL,
+			PRIMARY KEY (scm_name, branch)
+		)`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			return err
@@ -204,6 +220,15 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	_, _ = db.Exec(`
+		INSERT IGNORE INTO bam_rev (module_id, version, branch, git_commit, rpcs, http_apis)
+		SELECT m.id, f.version,
+			IF(f.version = m.version, m.branch, ''),
+			IF(f.version = m.version, m.git_commit, ''),
+			IF(f.version = m.version, m.rpcs, 0),
+			IF(f.version = m.version, m.http_apis, 0)
+		FROM (SELECT DISTINCT module_id, version FROM bam_file) f
+		JOIN bam_module m ON m.id = f.module_id`)
 	return nil
 }
 

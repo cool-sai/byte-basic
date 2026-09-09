@@ -200,8 +200,14 @@ func (s *server) ListBranches(_ context.Context, req *connect.Request[v1.ListBra
 	if err != nil {
 		return nil, invalid(fmt.Errorf("git ls-remote: %w\n%s", err, out))
 	}
-	resp := &v1.ListBranchesResponse{}
-	for _, line := range strings.Split(string(out), "\n") {
+	def, branches := parseGitLsRemote(string(out))
+	return connect.NewResponse(&v1.ListBranchesResponse{DefaultBranch: def, Branches: branches}), nil
+}
+
+func parseGitLsRemote(out string) (string, []*v1.GitBranch) {
+	var def string
+	var branches []*v1.GitBranch
+	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -209,19 +215,41 @@ func (s *server) ListBranches(_ context.Context, req *connect.Request[v1.ListBra
 		if strings.HasPrefix(line, "ref: ") {
 			rest := strings.TrimPrefix(line, "ref: ")
 			ref, _, _ := strings.Cut(rest, "\t")
-			resp.DefaultBranch = strings.TrimPrefix(ref, "refs/heads/")
+			def = strings.TrimPrefix(ref, "refs/heads/")
 			continue
 		}
 		hash, ref, ok := strings.Cut(line, "\t")
 		if !ok || !strings.HasPrefix(ref, "refs/heads/") {
 			continue
 		}
-		resp.Branches = append(resp.Branches, &v1.GitBranch{
+		branches = append(branches, &v1.GitBranch{
 			Name:   strings.TrimPrefix(ref, "refs/heads/"),
 			Commit: hash,
 		})
 	}
-	return connect.NewResponse(resp), nil
+	return def, branches
+}
+
+func gitLsRemote(url string) ([]*v1.GitBranch, error) {
+	cmd := exec.Command("git", "ls-remote", "--symref", url, "HEAD", "refs/heads/*")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-remote: %w\n%s", err, out)
+	}
+	_, branches := parseGitLsRemote(string(out))
+	return branches, nil
+}
+
+func normalizeGitURL(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.TrimSuffix(s, ".git")
+	s = strings.TrimPrefix(s, "git@")
+	s = strings.TrimPrefix(s, "ssh://")
+	s = strings.TrimPrefix(s, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	s = strings.ReplaceAll(s, ":", "/")
+	return strings.Trim(s, "/")
 }
 
 func checkScriptRel(rel string) error {

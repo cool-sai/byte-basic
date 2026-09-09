@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Message, Spin, Table, Tag, Typography } from "@arco-design/web-react";
+import { Button, Message, Select, Spin, Table, Tabs, Tag, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { Link, useParams } from "react-router-dom";
 import { api, errMsg, type BamField, type BamRpc } from "../../api";
@@ -18,36 +18,28 @@ function fieldList(fs?: BamField[] | null) {
 export default function ModulePage() {
   const { name = "" } = useParams();
   const [filePath, setFilePath] = useState("");
+  const [ver, setVer] = useState(0);
 
-  const { data: detail, loading, error, refresh } = useRequest(() => api.bamModule(name), {
-    refreshDeps: [name],
+  const { data: detail, loading, error } = useRequest(() => api.bamModule(name, ver || undefined), {
+    refreshDeps: [name, ver],
+    pollingInterval: 10000,
     onSuccess: (d) => {
       setFilePath((cur) => (d.files.some((f) => f.path === cur) ? cur : d.files[0]?.path || ""));
     },
   });
 
-  const { run: generate, loading: genBusy } = useRequest(() => api.generateBam(name), {
-    manual: true,
-    onSuccess: (r) => {
-      if (r.status === "ok") {
-        Message.success("已生成 v" + r.version + "，共 " + r.files.length + " 个文件");
-      } else {
-        Message.error(r.log || "生成失败");
-      }
-      void refresh();
-    },
-    onError: (e) => Message.error(errMsg(e)),
-  });
-
-  const { run: download, loading: dlBusy } = useRequest(() => api.downloadBam(name), {
-    manual: true,
-    onError: (e) => Message.error(errMsg(e)),
-  });
-
   const files = detail?.files || [];
   const cur = files.find((f) => f.path === filePath) || files[0];
   const rpcs = detail?.rpcs || [];
-  const yaml = ["endpoint: http://127.0.0.1:8081", "modules:", "  - name: " + name, "    out: gen"].join("\n");
+  const versions = detail?.versions || [];
+  const yaml = [
+    "endpoint: http://127.0.0.1:8081",
+    "modules:",
+    "  - name: " + name,
+    "    out: gen",
+    "    lang: go",
+    "    branch: " + (detail?.module.branch || "main"),
+  ].join("\n");
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -63,30 +55,36 @@ export default function ModulePage() {
                 <>
                   仓库 <Link to={"/scm/" + detail.module.scmName}>{detail.module.scmName}</Link>
                   {detail.module.protoDir ? " · " + detail.module.protoDir : ""}
-                  {detail.module.branch ? " · " + detail.module.branch : ""}
-                  {detail.module.gitCommit ? " · " + detail.module.gitCommit.slice(0, 8) : ""}
                   {" · "}
                 </>
               ) : null}
-              v{detail.module.version}
-              {detail.genStatus ? ` · 生成 ${detail.genStatus}` : " · 未生成"}
+              {detail.module.branch || "默认分支"}
+              {detail.module.gitCommit ? " · " + detail.module.gitCommit.slice(0, 8) : ""}
             </Typography.Text>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={!detail} loading={genBusy} onClick={() => generate()}>
-            生成代码
-          </Button>
-          <Button disabled={!detail || detail.genStatus !== "ok"} loading={dlBusy} onClick={() => download()}>
-            下载 zip
-          </Button>
-        </div>
+        {versions.length ? (
+          <Select
+            className="w-72"
+            value={detail?.module.version}
+            onChange={(v: number) => setVer(v)}
+          >
+            {versions.map((r) => (
+              <Select.Option key={r.version} value={r.version}>
+                {"v" +
+                  r.version +
+                  (r.branch ? " · " + r.branch : "") +
+                  (r.gitCommit ? " · " + r.gitCommit.slice(0, 8) : "")}
+              </Select.Option>
+            ))}
+          </Select>
+        ) : null}
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
       {detail?.parseError ? <Typography.Text type="error">{detail.parseError}</Typography.Text> : null}
       <div className="rounded border border-solid border-gray-200 p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <Typography.Text type="secondary">项目根目录 bam.yaml，然后 go run ./cmd/bam update</Typography.Text>
+          <Typography.Text type="secondary">项目根目录 bam.yaml。任意分支 push 会自动出一个版本。</Typography.Text>
           <Button
             size="small"
             onClick={() => {
@@ -102,77 +100,90 @@ export default function ModulePage() {
         <pre className="m-0 overflow-auto font-mono text-xs">{yaml}</pre>
       </div>
       <Spin loading={loading} className="w-full">
-        <div className="mt-1 flex flex-wrap gap-2">
-          {files.map((f) => (
-            <Button key={f.path} size="small" type={filePath === f.path ? "primary" : "secondary"} onClick={() => setFilePath(f.path)}>
-              {f.path}
-            </Button>
-          ))}
-        </div>
-        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <pre className="logbox m-0 min-h-[28rem] overflow-auto font-mono text-xs">{cur?.content || "无 proto"}</pre>
-          <div>
-            <Typography.Title heading={5}>{rpcs[0]?.service || "—"}</Typography.Title>
-            <Table
-              rowKey={(r: BamRpc) => r.service + "/" + r.name}
-              pagination={false}
-              data={rpcs}
-              columns={[
-                {
-                  title: "方法",
-                  dataIndex: "name",
-                  render: (n: string, m: BamRpc) => (
-                    <div>
-                      <div>
-                        {n}
-                        {m.stream ? (
-                          <Tag color="purple" className="ml-2">
-                            stream
-                          </Tag>
-                        ) : null}
-                      </div>
-                      {m.comment ? (
-                        <Typography.Text type="secondary" className="text-xs">
-                          {m.comment}
-                        </Typography.Text>
-                      ) : null}
-                      {m.uri ? (
-                        <Typography.Text type="secondary" className="font-mono text-xs">
-                          {m.httpMethod} {m.uri}
-                        </Typography.Text>
-                      ) : (
-                        <Typography.Text type="secondary" className="font-mono text-xs">
-                          Connect / gRPC
-                        </Typography.Text>
-                      )}
-                    </div>
-                  ),
-                },
-                {
-                  title: "协议",
-                  render: (_: unknown, m: BamRpc) =>
-                    m.uri ? <Tag color="cyan">HTTP</Tag> : <Tag color="arcoblue">RPC</Tag>,
-                },
-                {
-                  title: "入参",
-                  render: (_: unknown, m: BamRpc) => (
-                    <div>
-                      <b>{m.req}</b>
-                      <div className="meta">{fieldList(m.reqFields)}</div>
-                    </div>
-                  ),
-                },
-                {
-                  title: "出参",
-                  render: (_: unknown, m: BamRpc) => (
-                    <div>
-                      <b>{m.resp}</b>
-                      <div className="meta">{fieldList(m.respFields)}</div>
-                    </div>
-                  ),
-                },
-              ]}
-            />
+        <div className="flex min-h-[28rem] gap-4">
+          <div className="flex w-56 shrink-0 flex-col gap-1 overflow-auto">
+            {files.map((f) => (
+              <Button
+                key={f.path}
+                long
+                size="small"
+                type={filePath === f.path ? "primary" : "secondary"}
+                className="!h-auto !whitespace-normal !text-left"
+                onClick={() => setFilePath(f.path)}
+              >
+                {f.path}
+              </Button>
+            ))}
+          </div>
+          <div className="min-w-0 flex-1">
+            <Tabs>
+              <Tabs.TabPane key="proto" title="约束原文件">
+                <pre className="logbox m-0 min-h-[24rem] overflow-auto font-mono text-xs">{cur?.content || "无 proto"}</pre>
+              </Tabs.TabPane>
+              <Tabs.TabPane key="api" title="API 定义">
+                <Typography.Title heading={5}>{rpcs[0]?.service || "—"}</Typography.Title>
+                <Table
+                  rowKey={(r: BamRpc) => r.service + "/" + r.name}
+                  pagination={false}
+                  data={rpcs}
+                  columns={[
+                    {
+                      title: "方法",
+                      dataIndex: "name",
+                      render: (n: string, m: BamRpc) => (
+                        <div>
+                          <div>
+                            {n}
+                            {m.stream ? (
+                              <Tag color="purple" className="ml-2">
+                                stream
+                              </Tag>
+                            ) : null}
+                          </div>
+                          {m.comment ? (
+                            <Typography.Text type="secondary" className="text-xs">
+                              {m.comment}
+                            </Typography.Text>
+                          ) : null}
+                          {m.uri ? (
+                            <Typography.Text type="secondary" className="font-mono text-xs">
+                              {m.httpMethod} {m.uri}
+                            </Typography.Text>
+                          ) : (
+                            <Typography.Text type="secondary" className="font-mono text-xs">
+                              Connect / gRPC
+                            </Typography.Text>
+                          )}
+                        </div>
+                      ),
+                    },
+                    {
+                      title: "协议",
+                      render: (_: unknown, m: BamRpc) =>
+                        m.uri ? <Tag color="cyan">HTTP</Tag> : <Tag color="arcoblue">RPC</Tag>,
+                    },
+                    {
+                      title: "入参",
+                      render: (_: unknown, m: BamRpc) => (
+                        <div>
+                          <b>{m.req}</b>
+                          <div className="meta">{fieldList(m.reqFields)}</div>
+                        </div>
+                      ),
+                    },
+                    {
+                      title: "出参",
+                      render: (_: unknown, m: BamRpc) => (
+                        <div>
+                          <b>{m.resp}</b>
+                          <div className="meta">{fieldList(m.respFields)}</div>
+                        </div>
+                      ),
+                    },
+                  ]}
+                />
+              </Tabs.TabPane>
+            </Tabs>
           </div>
         </div>
       </Spin>

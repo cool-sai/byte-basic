@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,9 +22,10 @@ type bamFile struct {
 }
 
 type bamModule struct {
-	Name    string `yaml:"name"`
-	Out     string `yaml:"out"`
-	Version int    `yaml:"version"`
+	Name   string `yaml:"name"`
+	Out    string `yaml:"out"`
+	Lang   string `yaml:"lang"`
+	Branch string `yaml:"branch"`
 }
 
 func main() {
@@ -54,6 +56,8 @@ endpoint: http://127.0.0.1:8081
 modules:
   - name: platform.api
     out: gen
+    lang: go
+    branch: main
 `)
 }
 
@@ -96,11 +100,18 @@ func runUpdate(args []string) error {
 }
 
 func pullModule(client *http.Client, ep string, m bamModule, outDir string) (int, error) {
-	u := ep + "/api/bam/modules/" + m.Name + "/download.zip"
-	if m.Version > 0 {
-		u += fmt.Sprintf("?version=%d", m.Version)
+	u := ep + "/api/bam/modules/" + url.PathEscape(m.Name) + "/pull.zip"
+	q := url.Values{}
+	if m.Lang != "" {
+		q.Set("lang", m.Lang)
 	}
-	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if m.Branch != "" {
+		q.Set("branch", m.Branch)
+	}
+	if enc := q.Encode(); enc != "" {
+		u += "?" + enc
+	}
+	req, err := http.NewRequest(http.MethodPost, u, nil)
 	if err != nil {
 		return 0, err
 	}

@@ -53,7 +53,7 @@ export default function ModuleList() {
             BAM 服务
           </Typography.Title>
           <Typography.Text type="secondary">
-            一个模块绑仓库里的一个 proto 目录。同一仓库可以有多个服务。点进去看接口、生成代码；项目里用 bam update 拉取。
+            一个模块绑仓库里的一个 proto 目录。点进去看接口。项目里 bam.yaml 配语言和分支，bam update 拉最新。
           </Typography.Text>
         </div>
         <Button type="primary" onClick={() => setNewOpen(true)}>

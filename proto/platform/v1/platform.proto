@@ -321,6 +321,15 @@ message BamModule {
   string proto_dir = 9;
   string git_commit = 10;
 }
+message BamRev {
+  int32 version = 1;
+  string branch = 2;
+  string git_commit = 3;
+  int32 rpcs = 4;
+  int32 http_apis = 5;
+  string created_at = 6;
+  string gen_status = 7;
+}
 message BamModuleDetail {
   BamModule module = 1;
   repeated BamFile files = 2;
@@ -328,6 +337,7 @@ message BamModuleDetail {
   string parse_error = 4;
   string gen_status = 5;
   string gen_dir = 6;
+  repeated BamRev versions = 7;
 }
 message ListBamModulesRequest {}
 message ListBamModulesResponse {
@@ -341,6 +351,7 @@ message CreateBamModuleRequest {
 }
 message GetBamModuleRequest {
   string name = 1;
+  int32 version = 2;
 }
 message SaveBamModuleRequest {
   string name = 1;

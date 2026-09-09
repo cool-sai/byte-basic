@@ -112,6 +112,16 @@ export type BamModule = {
   gitCommit?: string;
 };
 
+export type BamRev = {
+  version: number;
+  branch?: string;
+  gitCommit?: string;
+  rpcs: number;
+  httpApis: number;
+  createdAt?: string;
+  genStatus?: string;
+};
+
 export type BamModuleDetail = {
   module: BamModule;
   files: BamFile[];
@@ -119,6 +129,7 @@ export type BamModuleDetail = {
   parseError?: string;
   genStatus?: string;
   genDir?: string;
+  versions: BamRev[];
 };
 
 export type Publish = {
@@ -331,6 +342,15 @@ function bamDetail(d: {
   parseError: string;
   genStatus: string;
   genDir: string;
+  versions?: Array<{
+    version: number;
+    branch: string;
+    gitCommit: string;
+    rpcs: number;
+    httpApis: number;
+    createdAt: string;
+    genStatus: string;
+  }>;
 }): BamModuleDetail {
   const m = d.module;
   if (!m) {
@@ -342,6 +362,15 @@ function bamDetail(d: {
     parseError: d.parseError || undefined,
     genStatus: d.genStatus || undefined,
     genDir: d.genDir || undefined,
+    versions: (d.versions || []).map((r) => ({
+      version: r.version,
+      branch: r.branch || undefined,
+      gitCommit: r.gitCommit || undefined,
+      rpcs: r.rpcs,
+      httpApis: r.httpApis,
+      createdAt: r.createdAt || undefined,
+      genStatus: r.genStatus || undefined,
+    })),
     rpcs: d.rpcs.map((r) => ({
       service: r.service,
       name: r.name,
@@ -446,28 +475,10 @@ export const api = {
   idl: (name: string) => client.getIdl({ name }).then(idl),
   saveIdl: (name: string, content: string) => client.saveIdl({ name, content }).then(idl),
   bamModules: () => client.listBamModules({}).then((r) => r.modules.map(bamMod)),
-  bamModule: (name: string) => client.getBamModule({ name }).then(bamDetail),
+  bamModule: (name: string, version?: number) =>
+    client.getBamModule(version ? { name, version } : { name }).then(bamDetail),
   createBamModule: (name: string, scmName: string, protoDir: string, branch?: string) =>
     client.createBamModule({ name, scmName, protoDir, branch: branch || "" }).then(bamMod),
-  generateBam: (name: string) =>
-    client.generateBam({ name }).then((r) => ({
-      version: r.version,
-      status: r.status,
-      log: r.log,
-      dir: r.dir,
-      files: r.files,
-    })),
-  downloadBam: async (name: string, version?: number) => {
-    const r = await client.downloadBam(version ? { name, version } : { name });
-    const zip = r.zip;
-    const buf = zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength) as ArrayBuffer;
-    const blob = new Blob([buf], { type: "application/zip" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = r.filename || name + ".zip";
-    a.click();
-    URL.revokeObjectURL(a.href);
-  },
   publishes: () =>
     client.listPublishes({}).then((r) =>
       r.publishes.map((p) => ({

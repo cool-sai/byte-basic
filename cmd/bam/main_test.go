@@ -15,8 +15,9 @@ modules:
   - name: platform.api
     out: gen
   - name: order
-    out: gen
-    version: 3
+    out: src/gen
+    lang: ts
+    branch: main
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +28,7 @@ modules:
 	if cfg.Modules[0].Name != "platform.api" || cfg.Modules[0].Out != "gen" {
 		t.Fatalf("%+v", cfg.Modules[0])
 	}
-	if cfg.Modules[1].Version != 3 {
+	if cfg.Modules[1].Lang != "ts" || cfg.Modules[1].Branch != "main" {
 		t.Fatalf("%+v", cfg.Modules[1])
 	}
 }

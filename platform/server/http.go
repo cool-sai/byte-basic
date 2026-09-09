@@ -26,6 +26,14 @@ func (s *server) serveHTTP(addr string) error {
 		return err
 	}
 	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/bam/hook" && r.Method == http.MethodPost {
+			s.handleBamHook(w, r)
+			return
+		}
+		if _, ok := bamPullName(r.URL.Path); ok && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
+			s.handleBamPull(w, r)
+			return
+		}
 		if r.Method == http.MethodGet {
 			if _, ok := bamZipName(r.URL.Path); ok {
 				s.handleBamZip(w, r)
@@ -46,6 +54,7 @@ func (s *server) serveHTTP(addr string) error {
 		})
 	}
 	log.Println("platform", addr)
+	go s.watchBamGit()
 	return http.ListenAndServe(addr, h2c.NewHandler(h, &http2.Server{}))
 }
 

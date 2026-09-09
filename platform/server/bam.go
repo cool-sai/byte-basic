@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"connectrpc.com/connect"
 	"github.com/bufbuild/protocompile"
@@ -29,6 +30,7 @@ import (
 
 var bamName = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._][a-z0-9]+)*$`)
 var bamPath = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*\.proto$`)
+var bamGenMu sync.Mutex
 
 func (s *server) seedBam() error {
 	var n int
@@ -118,7 +120,7 @@ func (s *server) CreateBamModule(_ context.Context, req *connect.Request[v1.Crea
 }
 
 func (s *server) GetBamModule(_ context.Context, req *connect.Request[v1.GetBamModuleRequest]) (*connect.Response[v1.BamModuleDetail], error) {
-	d, err := s.loadBam(strings.TrimSpace(req.Msg.Name))
+	d, err := s.loadBam(strings.TrimSpace(req.Msg.Name), int(req.Msg.Version))
 	if err != nil {
 		return nil, err
 	}
@@ -143,12 +145,12 @@ func (s *server) SaveBamModule(_ context.Context, req *connect.Request[v1.SaveBa
 		return nil, internal(err)
 	}
 	if scm != "" {
-		return nil, invalid(fmt.Errorf("请在仓库里改 proto，然后点生成"))
+		return nil, invalid(fmt.Errorf("请在仓库里改 proto，然后 bam update"))
 	}
 	if _, err := s.writeModule(name, files, "", "", "", ""); err != nil {
 		return nil, err
 	}
-	d, err := s.loadBam(name)
+	d, err := s.loadBam(name, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -156,27 +158,48 @@ func (s *server) SaveBamModule(_ context.Context, req *connect.Request[v1.SaveBa
 }
 
 func (s *server) GenerateBam(_ context.Context, req *connect.Request[v1.GenerateBamRequest]) (*connect.Response[v1.BamGenerateResponse], error) {
-	name := strings.TrimSpace(req.Msg.Name)
-	d, err := s.loadBam(name)
+	out, err := s.syncAndGen(strings.TrimSpace(req.Msg.Name), "")
 	if err != nil {
 		return nil, err
+	}
+	return connect.NewResponse(out), nil
+}
+
+func (s *server) syncAndGen(name, branch string) (*v1.BamGenerateResponse, error) {
+	bamGenMu.Lock()
+	defer bamGenMu.Unlock()
+	d, err := s.loadBam(name, 0)
+	if err != nil {
+		return nil, err
+	}
+	br := strings.TrimSpace(branch)
+	if br == "" {
+		br = d.Module.Branch
+	} else if err := checkBranch(br); err != nil {
+		return nil, invalid(err)
 	}
 	var repo, gitLog string
 	if d.Module.ScmName != "" {
 		var buf bytes.Buffer
-		repo, err = s.syncBamRepo(d.Module.ScmName, d.Module.Branch, &buf)
+		repo, err = s.syncBamRepo(d.Module.ScmName, br, &buf)
 		gitLog = buf.String()
 		if err != nil {
 			return nil, invalid(fmt.Errorf("%s%w", gitLog, err))
+		}
+		commit := gitHead(repo)
+		if commit != "" && commit == d.Module.GitCommit && br == d.Module.Branch && d.GenStatus == "ok" && d.GenDir != "" {
+			if st, err := os.Stat(d.GenDir); err == nil && st.IsDir() {
+				return &v1.BamGenerateResponse{Version: d.Module.Version, Status: "ok", Dir: d.GenDir, Log: gitLog}, nil
+			}
 		}
 		files, err := collectBamFiles(repo, d.Module.ProtoDir)
 		if err != nil {
 			return nil, invalid(err)
 		}
-		if _, err := s.writeModule(name, files, d.Module.ScmName, d.Module.Branch, d.Module.ProtoDir, gitHead(repo)); err != nil {
+		if _, err := s.writeModule(name, files, d.Module.ScmName, br, d.Module.ProtoDir, commit); err != nil {
 			return nil, err
 		}
-		d, err = s.loadBam(name)
+		d, err = s.loadBam(name, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -191,7 +214,7 @@ func (s *server) GenerateBam(_ context.Context, req *connect.Request[v1.Generate
 	if gitLog != "" {
 		out.Log = gitLog + out.Log
 	}
-	return connect.NewResponse(out), nil
+	return out, nil
 }
 
 func (s *server) DownloadBam(_ context.Context, req *connect.Request[v1.DownloadBamRequest]) (*connect.Response[v1.BamDownloadResponse], error) {
@@ -232,8 +255,15 @@ func (s *server) bamZip(name string, ver int) (string, []byte, error) {
 }
 
 func bamZipName(path string) (string, bool) {
+	return bamPathName(path, "/download.zip")
+}
+
+func bamPullName(path string) (string, bool) {
+	return bamPathName(path, "/pull.zip")
+}
+
+func bamPathName(path, suf string) (string, bool) {
 	const pre = "/api/bam/modules/"
-	const suf = "/download.zip"
 	if !strings.HasPrefix(path, pre) || !strings.HasSuffix(path, suf) {
 		return "", false
 	}
@@ -262,6 +292,99 @@ func (s *server) handleBamZip(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	_, _ = w.Write(zipb)
+}
+
+func (s *server) handleBamPull(w http.ResponseWriter, r *http.Request) {
+	name, ok := bamPullName(r.URL.Path)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	branch := strings.TrimSpace(r.URL.Query().Get("branch"))
+	lang := strings.TrimSpace(r.URL.Query().Get("lang"))
+	out, err := s.syncAndGen(name, branch)
+	if err != nil {
+		writeHTTPError(w, err)
+		return
+	}
+	if out.Status != "ok" {
+		writeHTTPError(w, invalid(fmt.Errorf("%s", out.Log)))
+		return
+	}
+	filename, zipb, err := s.bamZip(name, int(out.Version))
+	if err != nil {
+		writeHTTPError(w, err)
+		return
+	}
+	zipb, err = filterZipLang(zipb, lang)
+	if err != nil {
+		writeHTTPError(w, invalid(err))
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	_, _ = w.Write(zipb)
+}
+
+func filterZipLang(zipb []byte, lang string) ([]byte, error) {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	if lang == "" || lang == "all" {
+		return zipb, nil
+	}
+	if lang != "go" && lang != "ts" {
+		return nil, fmt.Errorf("lang 须是 go 或 ts")
+	}
+	r, err := zip.NewReader(bytes.NewReader(zipb), int64(len(zipb)))
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	n := 0
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		name := filepath.ToSlash(f.Name)
+		isTS := strings.HasPrefix(name, "ts/")
+		if lang == "go" && isTS {
+			continue
+		}
+		if lang == "ts" && !isTS {
+			continue
+		}
+		if lang == "ts" {
+			name = strings.TrimPrefix(name, "ts/")
+		}
+		rc, err := f.Open()
+		if err != nil {
+			_ = w.Close()
+			return nil, err
+		}
+		b, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			_ = w.Close()
+			return nil, err
+		}
+		fw, err := w.Create(name)
+		if err != nil {
+			_ = w.Close()
+			return nil, err
+		}
+		if _, err := fw.Write(b); err != nil {
+			_ = w.Close()
+			return nil, err
+		}
+		n++
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, fmt.Errorf("没有 %s 产物", lang)
+	}
+	return buf.Bytes(), nil
 }
 
 func writeHTTPError(w http.ResponseWriter, err error) {
@@ -334,6 +457,12 @@ func (s *server) writeModule(name string, files []*v1.BamFile, scmName, branch, 
 			return nil, internal(err)
 		}
 	}
+	if _, err := tx.Exec(
+		`INSERT INTO bam_rev (module_id, version, branch, git_commit, rpcs, http_apis) VALUES (?,?,?,?,?,?)`,
+		id, ver, branch, commit, rpcCount, httpN,
+	); err != nil {
+		return nil, internal(err)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, internal(err)
 	}
@@ -359,14 +488,40 @@ func (s *server) getBamModule(name string) (*v1.BamModule, error) {
 	return m, nil
 }
 
-func (s *server) loadBam(name string) (*v1.BamModuleDetail, error) {
+func (s *server) loadBam(name string, ver int) (*v1.BamModuleDetail, error) {
 	mod, err := s.getBamModule(name)
 	if err != nil {
 		return nil, err
 	}
+	if ver <= 0 {
+		ver = int(mod.Version)
+	}
+	if ver != int(mod.Version) {
+		var br, commit string
+		var rpcs, httpN int32
+		var t sql.NullTime
+		err = s.db.QueryRow(
+			`SELECT branch, git_commit, rpcs, http_apis, created_at FROM bam_rev WHERE module_id=? AND version=?`,
+			mod.Id, ver,
+		).Scan(&br, &commit, &rpcs, &httpN, &t)
+		if err == sql.ErrNoRows {
+			return nil, notFound(fmt.Errorf("没有版本 %s@%d", name, ver))
+		}
+		if err != nil {
+			return nil, internal(err)
+		}
+		mod.Version = int32(ver)
+		mod.Branch = br
+		mod.GitCommit = commit
+		mod.Rpcs = rpcs
+		mod.HttpApis = httpN
+		if t.Valid {
+			mod.CreatedAt = fmtTime(t.Time)
+		}
+	}
 	rows, err := s.db.Query(
 		`SELECT path, content FROM bam_file WHERE module_id=? AND version=? ORDER BY path`,
-		mod.Id, mod.Version,
+		mod.Id, ver,
 	)
 	if err != nil {
 		return nil, internal(err)
@@ -402,7 +557,40 @@ func (s *server) loadBam(name string) (*v1.BamModuleDetail, error) {
 	} else if err != sql.ErrNoRows {
 		return nil, internal(err)
 	}
+	vers, err := s.listBamRevs(mod.Id)
+	if err != nil {
+		return nil, internal(err)
+	}
+	d.Versions = vers
 	return d, nil
+}
+
+func (s *server) listBamRevs(moduleID int64) ([]*v1.BamRev, error) {
+	rows, err := s.db.Query(
+		`SELECT r.version, r.branch, r.git_commit, r.rpcs, r.http_apis, r.created_at, IFNULL(g.status,'')
+		 FROM bam_rev r
+		 LEFT JOIN bam_gen g ON g.module_id=r.module_id AND g.version=r.version
+		 WHERE r.module_id=?
+		 ORDER BY r.version DESC`,
+		moduleID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*v1.BamRev
+	for rows.Next() {
+		r := &v1.BamRev{}
+		var t sql.NullTime
+		if err := rows.Scan(&r.Version, &r.Branch, &r.GitCommit, &r.Rpcs, &r.HttpApis, &t, &r.GenStatus); err != nil {
+			return nil, err
+		}
+		if t.Valid {
+			r.CreatedAt = fmtTime(t.Time)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 func (s *server) runBamGen(d *v1.BamModuleDetail, repo string) (*v1.BamGenerateResponse, error) {
