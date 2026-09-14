@@ -1,18 +1,17 @@
 import { useState } from "react";
-import { Button, Card, Input, Message, Modal, Select, Spin, Typography } from "@arco-design/web-react";
+import { Button, Card, Message, Modal, Spin, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api, errMsg } from "../../api";
+import { api, errMsg, type DeployApp } from "../../api";
 import LabelIcon from "../scm/LabelIcon";
+import AppForm from "./AppForm";
 import Crumbs from "./Crumbs";
 
 export default function AppList() {
   const loc = useLocation();
   const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const [scmName, setScmName] = useState("");
-  const [compose, setCompose] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<DeployApp | null>(null);
 
   const { data, loading, error, refresh } = useRequest(
     async () => ({
@@ -26,29 +25,29 @@ export default function AppList() {
   const jobs = data?.jobs || [];
   const services = data?.services || [];
 
-  const { runAsync: submit, loading: submitting } = useRequest(
-    (n: string, scm: string, c: string) => api.createDeployApp(n, scm, c),
+  const { runAsync: remove } = useRequest((n: string) => api.deleteDeployApp(n), {
+    manual: true,
+    onSuccess: (_d, [n]) => {
+      Message.success("已删除 " + n);
+      void refresh();
+    },
+    onError: (e) => Message.error(errMsg(e)),
+  });
+
+  const { runAsync: save, loading: saving } = useRequest(
+    (n: string, scm: string, c: string, isEdit: boolean) =>
+      isEdit ? api.updateDeployApp(n, scm, c) : api.createDeployApp(n, scm, c),
     {
       manual: true,
-      onSuccess: (_d, [n]) => {
-        Message.success("已新建 " + n);
-        setName("");
-        setScmName("");
-        setCompose("");
-        setCreating(false);
+      onSuccess: (_d, [n, _scm, _c, isEdit]) => {
+        Message.success(isEdit ? "已保存 " + n : "已新建 " + n);
+        setFormOpen(false);
+        setEditing(null);
         void refresh();
       },
       onError: (e) => Message.error(errMsg(e)),
     },
   );
-
-  const fillName = (n: string) => {
-    setName(n);
-    const hit = services.find((s) => s.name === n);
-    if (hit) {
-      setCompose(hit.compose.join(","));
-    }
-  };
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -62,7 +61,13 @@ export default function AppList() {
             注册服务名并关联 SCM。golang 产物当二进制启动；node 产物打成 nginx 静态站点；python 产物跑 Flask。不在 compose 里的服务，部署时会注册进去。
           </Typography.Text>
         </div>
-        <Button type="primary" onClick={() => setCreating(true)}>
+        <Button
+          type="primary"
+          onClick={() => {
+            setEditing(null);
+            setFormOpen(true);
+          }}
+        >
           新建项目
         </Button>
       </div>
@@ -82,6 +87,35 @@ export default function AppList() {
               hoverable
               className="cursor-pointer"
               onClick={() => navigate("/deploy/" + a.name)}
+              extra={
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="mini"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditing(a);
+                      setFormOpen(true);
+                    }}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    size="mini"
+                    status="danger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      Modal.confirm({
+                        title: "删除项目 " + a.name + "？",
+                        content: "部署记录会删掉。不在主 compose 里的容器会停掉。",
+                        okButtonProps: { status: "danger" },
+                        onOk: () => remove(a.name),
+                      });
+                    }}
+                  >
+                    删除
+                  </Button>
+                </div>
+              }
             >
               <div className="meta">SCM {a.scmName}</div>
               <div className="meta">Compose {(a.compose || []).join(", ")}</div>
@@ -89,42 +123,18 @@ export default function AppList() {
           ))}
         </div>
       </Spin>
-      <Modal
-        title="新建部署项目"
-        visible={creating}
-        onCancel={() => setCreating(false)}
-        onOk={() => void submit(name.trim(), scmName, compose.trim())}
-        confirmLoading={submitting}
-        okButtonProps={{ disabled: !name.trim() || !scmName }}
-      >
-        <div className="flex w-full flex-col gap-4">
-          <Input addBefore="名称" value={name} onChange={fillName} placeholder="user" />
-          <Select
-            value={scmName || undefined}
-            onChange={(v: string) => {
-              setScmName(v);
-              const j = jobs.find((x) => x.name === v);
-              if (j && !name) {
-                setName(j.name);
-              }
-              if (j && !compose) {
-                const hit = services.find((s) => s.name === v);
-                setCompose(hit ? hit.compose.join(",") : j.name);
-              }
-            }}
-            placeholder="关联 SCM"
-            className="w-full"
-          >
-            {jobs.map((j) => (
-              <Select.Option key={j.name} value={j.name}>
-                {(j.label || "golang") + " · " + j.name}
-              </Select.Option>
-            ))}
-          </Select>
-          <Input addBefore="Compose" value={compose} onChange={setCompose} placeholder="user" />
-          <Typography.Text type="secondary">Compose 不填时：目录里有同名服务就用它，否则用服务名自己起一份（node 静态站）。</Typography.Text>
-        </div>
-      </Modal>
+      <AppForm
+        visible={formOpen}
+        app={editing}
+        jobs={jobs}
+        services={services}
+        loading={saving}
+        onCancel={() => {
+          setFormOpen(false);
+          setEditing(null);
+        }}
+        onOk={(n, scm, c) => void save(n, scm, c, Boolean(editing))}
+      />
     </div>
   );
 }

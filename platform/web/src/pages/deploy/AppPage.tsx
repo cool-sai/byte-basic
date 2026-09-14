@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, errMsg, type Build, type Container, type DeployRecord } from "../../api";
 import LabelIcon from "../scm/LabelIcon";
 import LogBox from "../scm/LogBox";
+import AppForm from "./AppForm";
 import Crumbs from "./Crumbs";
 
 export default function AppPage() {
@@ -12,6 +13,7 @@ export default function AppPage() {
   const loc = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [mode, setMode] = useState<"artifact" | "build">("artifact");
   const [version, setVersion] = useState("");
   const [branch, setBranch] = useState("");
@@ -39,6 +41,14 @@ export default function AppPage() {
   const compose = app?.compose || [];
   const runtime = (data?.runtime || []).filter((c) => compose.includes(c.Service || ""));
   const scmName = app?.scmName || "";
+
+  const { data: formMeta } = useRequest(
+    async () => ({
+      jobs: (await api.scmJobs()).jobs || [],
+      services: (await api.services()) || [],
+    }),
+    { ready: editOpen, refreshDeps: [editOpen] },
+  );
 
   const { data: br, loading: brLoading, error: brErr } = useRequest(() => api.branches(scmName), {
     ready: open && !!scmName,
@@ -102,17 +112,42 @@ export default function AppPage() {
             <div className="meta">按仓库 Dockerfile 打镜像，发完后替换 compose 服务 {compose.join(", ")}。</div>
           ) : null}
         </div>
-        <Button
-          type="primary"
-          disabled={!app}
-          onClick={() => {
-            setLiveLog("");
-            setMode(okBuilds.length ? "artifact" : "build");
-            setOpen(true);
-          }}
-        >
-          部署
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button disabled={!app} onClick={() => setEditOpen(true)}>
+            编辑
+          </Button>
+          <Button
+            status="danger"
+            onClick={() => {
+              Modal.confirm({
+                title: "删除项目 " + name + "？",
+                content: "部署记录会删掉。不在主 compose 里的容器会停掉。",
+                okButtonProps: { status: "danger" },
+                onOk: () =>
+                  api.deleteDeployApp(name).then(
+                    () => {
+                      Message.success("已删除 " + name);
+                      navigate("/deploy");
+                    },
+                    (e) => Message.error(errMsg(e)),
+                  ),
+              });
+            }}
+          >
+            删除
+          </Button>
+          <Button
+            type="primary"
+            disabled={!app}
+            onClick={() => {
+              setLiveLog("");
+              setMode(okBuilds.length ? "artifact" : "build");
+              setOpen(true);
+            }}
+          >
+            部署
+          </Button>
+        </div>
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
 
@@ -156,6 +191,23 @@ export default function AppPage() {
         ]}
       />
 
+      <AppForm
+        visible={editOpen}
+        app={app}
+        jobs={formMeta?.jobs || []}
+        services={formMeta?.services || []}
+        onCancel={() => setEditOpen(false)}
+        onOk={(n, scm, c) => {
+          void api.updateDeployApp(n, scm, c).then(
+            () => {
+              Message.success("已保存");
+              setEditOpen(false);
+              void refresh();
+            },
+            (e) => Message.error(errMsg(e)),
+          );
+        }}
+      />
       <Modal
         title={"部署 " + (app?.name || name)}
         visible={open}

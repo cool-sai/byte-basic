@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -695,18 +696,9 @@ func (s *server) CreateApp(_ context.Context, req *connect.Request[v1.CreateAppR
 	if _, err := s.getJob(scmName); err != nil {
 		return nil, invalid(fmt.Errorf("scm: %w", err))
 	}
-	compose := parseCompose(req.Msg.Compose)
-	if len(compose) == 0 {
-		if c, ok := lookup(name); ok {
-			compose = c.Compose
-		} else {
-			compose = []string{name}
-		}
-	}
-	for _, svc := range compose {
-		if !jobName.MatchString(svc) {
-			return nil, invalid(fmt.Errorf("bad compose service %s", svc))
-		}
+	compose, err := resolveAppCompose(name, req.Msg.Compose)
+	if err != nil {
+		return nil, invalid(err)
 	}
 	res, err := s.db.Exec(
 		`INSERT INTO deploy_app (name, scm_name, compose) VALUES (?,?,?)`,
@@ -725,6 +717,91 @@ func (s *server) ShowApp(_ context.Context, req *connect.Request[v1.ShowAppReque
 		return nil, notFound(err)
 	}
 	return connect.NewResponse(appProto(a, "")), nil
+}
+
+func (s *server) UpdateApp(_ context.Context, req *connect.Request[v1.UpdateAppRequest]) (*connect.Response[v1.App], error) {
+	a, err := s.getApp(req.Msg.Name)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	scmName := strings.TrimSpace(req.Msg.ScmName)
+	if _, err := s.getJob(scmName); err != nil {
+		return nil, invalid(fmt.Errorf("scm: %w", err))
+	}
+	compose, err := resolveAppCompose(a.Name, req.Msg.Compose)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	_, err = s.db.Exec(
+		`UPDATE deploy_app SET scm_name=?, compose=? WHERE name=?`,
+		scmName, strings.Join(compose, ","), a.Name,
+	)
+	if err != nil {
+		return nil, internal(err)
+	}
+	s.dropExtraRuntime(composeDropped(a.Compose, compose))
+	a, err = s.getApp(a.Name)
+	if err != nil {
+		return nil, internal(err)
+	}
+	return connect.NewResponse(appProto(a, "")), nil
+}
+
+func (s *server) DeleteApp(_ context.Context, req *connect.Request[v1.DeleteAppRequest]) (*connect.Response[v1.DeleteAppResponse], error) {
+	a, err := s.getApp(req.Msg.Name)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	s.dropExtraRuntime(a.Compose)
+	if _, err := s.db.Exec(`DELETE FROM deploy_record WHERE service=?`, a.Name); err != nil {
+		return nil, internal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM deploy_app WHERE name=?`, a.Name); err != nil {
+		return nil, internal(err)
+	}
+	return connect.NewResponse(&v1.DeleteAppResponse{Name: a.Name}), nil
+}
+
+func resolveAppCompose(name, raw string) ([]string, error) {
+	compose := parseCompose(raw)
+	if len(compose) == 0 {
+		if c, ok := lookup(name); ok {
+			compose = c.Compose
+		} else {
+			compose = []string{name}
+		}
+	}
+	for _, svc := range compose {
+		if !jobName.MatchString(svc) {
+			return nil, fmt.Errorf("bad compose service %s", svc)
+		}
+	}
+	return compose, nil
+}
+
+func composeDropped(old, next []string) []string {
+	keep := map[string]bool{}
+	for _, c := range next {
+		keep[c] = true
+	}
+	var out []string
+	for _, c := range old {
+		if !keep[c] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func extraCompose(compose []string, main map[string]bool) []string {
+	var out []string
+	for _, c := range compose {
+		if main[c] || !jobName.MatchString(c) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func (s *server) getApp(name string) (deployApp, error) {
@@ -913,7 +990,7 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 			return
 		}
 	}
-	if err := s.syncRuntimeCompose(); err != nil {
+	if err := s.syncRuntimeCompose(app, label); err != nil {
 		finish("fail", err)
 		return
 	}
@@ -960,12 +1037,27 @@ func (s *server) Runtime(context.Context, *connect.Request[v1.RuntimeRequest]) (
 	return connect.NewResponse(&v1.RuntimeResponse{Containers: items}), nil
 }
 
-func (s *server) composeCmd(args ...string) *exec.Cmd {
-	prefix := []string{"compose"}
-	rt := filepath.Join(s.root, "deploy", "runtime.yml")
-	if _, err := os.Stat(rt); err == nil {
-		prefix = append(prefix, "-f", "docker-compose.yml", "-f", "deploy/runtime.yml")
+func (s *server) composeFileArgs() []string {
+	files := []string{"docker-compose.yml"}
+	matches, err := filepath.Glob(filepath.Join(s.root, "deploy", "runtime", "*.yml"))
+	if err == nil {
+		sort.Strings(matches)
+		for _, p := range matches {
+			files = append(files, filepath.Join("deploy", "runtime", filepath.Base(p)))
+		}
 	}
+	if _, err := os.Stat(filepath.Join(s.root, "deploy", "runtime.yml")); err == nil {
+		files = append(files, "deploy/runtime.yml")
+	}
+	args := make([]string, 0, len(files)*2)
+	for _, f := range files {
+		args = append(args, "-f", f)
+	}
+	return args
+}
+
+func (s *server) composeCmd(args ...string) *exec.Cmd {
+	prefix := append([]string{"compose"}, s.composeFileArgs()...)
 	cmd := exec.Command("docker", append(prefix, args...)...)
 	cmd.Dir = s.root
 	return cmd
@@ -1003,10 +1095,7 @@ func (s *server) hostRoot() string {
 func (s *server) composeSidecar(w io.Writer, args ...string) error {
 	root := s.hostRoot()
 	fmt.Fprint(w, "$ docker run --rm compose-sidecar\n")
-	composeArgs := []string{"compose"}
-	if _, err := os.Stat(filepath.Join(s.root, "deploy", "runtime.yml")); err == nil {
-		composeArgs = append(composeArgs, "-f", "docker-compose.yml", "-f", "deploy/runtime.yml")
-	}
+	composeArgs := append([]string{"compose"}, s.composeFileArgs()...)
 	composeArgs = append(composeArgs, args...)
 	cmd := exec.Command("docker", append([]string{
 		"run", "--rm",
@@ -1154,12 +1243,79 @@ func (s *server) buildPythonImage(lg io.Writer, src, imageVer, imageLocal string
 	return build.Run()
 }
 
-func (s *server) syncRuntimeCompose() error {
+func runtimeServiceYAML(svc, image, label string) string {
+	var y strings.Builder
+	fmt.Fprintf(&y, "services:\n  %s:\n    image: %s\n    hostname: %s\n    pull_policy: never\n    expose:\n      - \"80\"\n    labels:\n      psm: %s\n", svc, image, svc, svc)
+	if label == "golang" {
+		y.WriteString("    environment:\n      LISTEN: \"0.0.0.0:80\"\n")
+	} else {
+		if label == "python" {
+			y.WriteString("    environment:\n      LISTEN: \"0.0.0.0:80\"\n")
+		}
+	}
+	return y.String()
+}
+
+func splitRuntimeServices(s string) map[string]string {
+	out := map[string]string{}
+	var name string
+	var b strings.Builder
+	flush := func() {
+		if name != "" {
+			out[name] = b.String()
+		}
+		b.Reset()
+		name = ""
+	}
+	for _, line := range strings.SplitAfter(s, "\n") {
+		trim := strings.TrimRight(line, "\n")
+		if trim == "services:" {
+			continue
+		}
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") && strings.HasSuffix(trim, ":") {
+			flush()
+			name = strings.TrimSuffix(strings.TrimSpace(trim), ":")
+			b.WriteString(line)
+			continue
+		}
+		if name != "" {
+			b.WriteString(line)
+		}
+	}
+	flush()
+	return out
+}
+
+func splitCombinedRuntime(root string) error {
+	old := filepath.Join(root, "deploy", "runtime.yml")
+	b, err := os.ReadFile(old)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	dir := filepath.Join(root, "deploy", "runtime")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	for name, body := range splitRuntimeServices(string(b)) {
+		if !jobName.MatchString(name) {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, name+".yml"), []byte("services:\n"+body), 0o644); err != nil {
+			return err
+		}
+	}
+	return os.Remove(old)
+}
+
+func (s *server) mainComposeServices() (map[string]bool, error) {
 	cmd := exec.Command("docker", "compose", "-f", "docker-compose.yml", "config", "--services")
 	cmd.Dir = s.root
 	b, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("compose config: %w\n%s", err, b)
+		return nil, fmt.Errorf("compose config: %w\n%s", err, b)
 	}
 	main := map[string]bool{}
 	for _, line := range strings.Split(string(b), "\n") {
@@ -1168,62 +1324,52 @@ func (s *server) syncRuntimeCompose() error {
 			main[line] = true
 		}
 	}
-	rows, err := s.db.Query(`
-		SELECT a.name, a.compose, IFNULL(j.label,'')
-		FROM deploy_app a LEFT JOIN scm_job j ON j.name = a.scm_name`)
+	return main, nil
+}
+
+func (s *server) dropExtraRuntime(compose []string) {
+	_ = splitCombinedRuntime(s.root)
+	main, err := s.mainComposeServices()
+	stop := err == nil
+	if err != nil {
+		main = map[string]bool{}
+	}
+	for _, c := range extraCompose(compose, main) {
+		if stop {
+			_, _ = s.compose("stop", c)
+			_, _ = s.compose("rm", "-f", c)
+		}
+		_ = os.Remove(filepath.Join(s.root, "deploy", "runtime", c+".yml"))
+	}
+}
+
+func (s *server) syncRuntimeCompose(app deployApp, label string) error {
+	if err := splitCombinedRuntime(s.root); err != nil {
+		return err
+	}
+	if label == "" {
+		label = "golang"
+	}
+	if label != "node" && label != "golang" {
+		if label != "python" && label != "image" {
+			return nil
+		}
+	}
+	main, err := s.mainComposeServices()
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	type extra struct{ svc, image, label string }
-	var extras []extra
-	seen := map[string]bool{}
-	for rows.Next() {
-		var name, compose, label string
-		if err := rows.Scan(&name, &compose, &label); err != nil {
+	dir := filepath.Join(s.root, "deploy", "runtime")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	image := "minikitex-" + app.Name + ":local"
+	for _, c := range extraCompose(app.Compose, main) {
+		if err := os.WriteFile(filepath.Join(dir, c+".yml"), []byte(runtimeServiceYAML(c, image, label)), 0o644); err != nil {
 			return err
 		}
-		if label == "" {
-			label = "golang"
-		}
-		if label != "node" && label != "golang" {
-			if label != "python" && label != "image" {
-				continue
-			}
-		}
-		image := "minikitex-" + name + ":local"
-		for _, c := range parseCompose(compose) {
-			if main[c] || seen[c] {
-				continue
-			}
-			seen[c] = true
-			extras = append(extras, extra{svc: c, image: image, label: label})
-		}
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	path := filepath.Join(s.root, "deploy", "runtime.yml")
-	if len(extras) == 0 {
-		_ = os.Remove(path)
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	var y strings.Builder
-	y.WriteString("services:\n")
-	for _, e := range extras {
-		fmt.Fprintf(&y, "  %s:\n    image: %s\n    hostname: %s\n    pull_policy: never\n    expose:\n      - \"80\"\n    labels:\n      psm: %s\n", e.svc, e.image, e.svc, e.svc)
-		if e.label == "golang" {
-			y.WriteString("    environment:\n      LISTEN: \"0.0.0.0:80\"\n")
-		} else {
-			if e.label == "python" {
-				y.WriteString("    environment:\n      LISTEN: \"0.0.0.0:80\"\n")
-			}
-		}
-	}
-	return os.WriteFile(path, []byte(y.String()), 0o644)
+	return nil
 }
 
 func seedGitURL(root string) string {
@@ -1244,6 +1390,8 @@ func (s *server) seedRelease() error {
 	jobs := []struct{ name, script, label, app, compose string }{
 		{"platform-web", "scripts/scm/platform-web.sh", "node", "platform-web", "platform-web"},
 		{"platform-api", "Dockerfile.platform", "image", "platform", "platform"},
+		{"home-web", "scripts/scm/home-web.sh", "node", "home-web", "home-web"},
+		{"home-api", "scripts/scm/home-api.sh", "golang", "home", "home"},
 		{"tlb", "Dockerfile.tlb", "image", "tlb", "tlb"},
 		{"user", "scripts/scm/user.sh", "golang", "user", "user"},
 		{"order", "scripts/scm/order.sh", "golang", "order", "order"},
@@ -1264,6 +1412,9 @@ func (s *server) seedRelease() error {
 			return fmt.Errorf("seed deploy %s: %w", j.app, err)
 		}
 	}
+	_, _ = s.db.Exec(
+		`UPDATE scm_job SET script_path='scripts/scm/home-api.sh', label='golang' WHERE name='home-api' AND (script_path='Dockerfile.home' OR label='image')`,
+	)
 	return nil
 }
 

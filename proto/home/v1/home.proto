@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package home.v1;
+
+option go_package = "minikitex/gen/home/v1;homev1";
+
+import "google/api/annotations.proto";
+
+service HomeService {
+  rpc ListSites(ListSitesRequest) returns (ListSitesResponse) {
+    option (google.api.http) = { get: "/api/sites" };
+  }
+}
+
+message Site {
+  string name = 1;
+  string title = 2;
+  string desc = 3;
+  string href = 4;
+}
+
+message ListSitesRequest {}
+
+message ListSitesResponse {
+  repeated Site sites = 1;
+}

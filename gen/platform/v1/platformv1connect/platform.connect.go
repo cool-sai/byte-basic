@@ -108,6 +108,12 @@ const (
 	// PlatformServiceCreateAppProcedure is the fully-qualified name of the PlatformService's CreateApp
 	// RPC.
 	PlatformServiceCreateAppProcedure = "/platform.v1.PlatformService/CreateApp"
+	// PlatformServiceUpdateAppProcedure is the fully-qualified name of the PlatformService's UpdateApp
+	// RPC.
+	PlatformServiceUpdateAppProcedure = "/platform.v1.PlatformService/UpdateApp"
+	// PlatformServiceDeleteAppProcedure is the fully-qualified name of the PlatformService's DeleteApp
+	// RPC.
+	PlatformServiceDeleteAppProcedure = "/platform.v1.PlatformService/DeleteApp"
 	// PlatformServiceListDeploysProcedure is the fully-qualified name of the PlatformService's
 	// ListDeploys RPC.
 	PlatformServiceListDeploysProcedure = "/platform.v1.PlatformService/ListDeploys"
@@ -189,6 +195,8 @@ type PlatformServiceClient interface {
 	ListApps(context.Context, *connect.Request[v1.ListAppsRequest]) (*connect.Response[v1.ListAppsResponse], error)
 	ShowApp(context.Context, *connect.Request[v1.ShowAppRequest]) (*connect.Response[v1.App], error)
 	CreateApp(context.Context, *connect.Request[v1.CreateAppRequest]) (*connect.Response[v1.App], error)
+	UpdateApp(context.Context, *connect.Request[v1.UpdateAppRequest]) (*connect.Response[v1.App], error)
+	DeleteApp(context.Context, *connect.Request[v1.DeleteAppRequest]) (*connect.Response[v1.DeleteAppResponse], error)
 	ListDeploys(context.Context, *connect.Request[v1.ListDeploysRequest]) (*connect.Response[v1.ListDeploysResponse], error)
 	GetDeploy(context.Context, *connect.Request[v1.GetDeployRequest]) (*connect.Response[v1.Deploy], error)
 	WatchDeploy(context.Context, *connect.Request[v1.WatchDeployRequest]) (*connect.ServerStreamForClient[v1.RunEvent], error)
@@ -381,6 +389,18 @@ func NewPlatformServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(platformServiceMethods.ByName("CreateApp")),
 			connect.WithClientOptions(opts...),
 		),
+		updateApp: connect.NewClient[v1.UpdateAppRequest, v1.App](
+			httpClient,
+			baseURL+PlatformServiceUpdateAppProcedure,
+			connect.WithSchema(platformServiceMethods.ByName("UpdateApp")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteApp: connect.NewClient[v1.DeleteAppRequest, v1.DeleteAppResponse](
+			httpClient,
+			baseURL+PlatformServiceDeleteAppProcedure,
+			connect.WithSchema(platformServiceMethods.ByName("DeleteApp")),
+			connect.WithClientOptions(opts...),
+		),
 		listDeploys: connect.NewClient[v1.ListDeploysRequest, v1.ListDeploysResponse](
 			httpClient,
 			baseURL+PlatformServiceListDeploysProcedure,
@@ -515,6 +535,8 @@ type platformServiceClient struct {
 	listApps         *connect.Client[v1.ListAppsRequest, v1.ListAppsResponse]
 	showApp          *connect.Client[v1.ShowAppRequest, v1.App]
 	createApp        *connect.Client[v1.CreateAppRequest, v1.App]
+	updateApp        *connect.Client[v1.UpdateAppRequest, v1.App]
+	deleteApp        *connect.Client[v1.DeleteAppRequest, v1.DeleteAppResponse]
 	listDeploys      *connect.Client[v1.ListDeploysRequest, v1.ListDeploysResponse]
 	getDeploy        *connect.Client[v1.GetDeployRequest, v1.Deploy]
 	watchDeploy      *connect.Client[v1.WatchDeployRequest, v1.RunEvent]
@@ -669,6 +691,16 @@ func (c *platformServiceClient) CreateApp(ctx context.Context, req *connect.Requ
 	return c.createApp.CallUnary(ctx, req)
 }
 
+// UpdateApp calls platform.v1.PlatformService.UpdateApp.
+func (c *platformServiceClient) UpdateApp(ctx context.Context, req *connect.Request[v1.UpdateAppRequest]) (*connect.Response[v1.App], error) {
+	return c.updateApp.CallUnary(ctx, req)
+}
+
+// DeleteApp calls platform.v1.PlatformService.DeleteApp.
+func (c *platformServiceClient) DeleteApp(ctx context.Context, req *connect.Request[v1.DeleteAppRequest]) (*connect.Response[v1.DeleteAppResponse], error) {
+	return c.deleteApp.CallUnary(ctx, req)
+}
+
 // ListDeploys calls platform.v1.PlatformService.ListDeploys.
 func (c *platformServiceClient) ListDeploys(ctx context.Context, req *connect.Request[v1.ListDeploysRequest]) (*connect.Response[v1.ListDeploysResponse], error) {
 	return c.listDeploys.CallUnary(ctx, req)
@@ -783,6 +815,8 @@ type PlatformServiceHandler interface {
 	ListApps(context.Context, *connect.Request[v1.ListAppsRequest]) (*connect.Response[v1.ListAppsResponse], error)
 	ShowApp(context.Context, *connect.Request[v1.ShowAppRequest]) (*connect.Response[v1.App], error)
 	CreateApp(context.Context, *connect.Request[v1.CreateAppRequest]) (*connect.Response[v1.App], error)
+	UpdateApp(context.Context, *connect.Request[v1.UpdateAppRequest]) (*connect.Response[v1.App], error)
+	DeleteApp(context.Context, *connect.Request[v1.DeleteAppRequest]) (*connect.Response[v1.DeleteAppResponse], error)
 	ListDeploys(context.Context, *connect.Request[v1.ListDeploysRequest]) (*connect.Response[v1.ListDeploysResponse], error)
 	GetDeploy(context.Context, *connect.Request[v1.GetDeployRequest]) (*connect.Response[v1.Deploy], error)
 	WatchDeploy(context.Context, *connect.Request[v1.WatchDeployRequest], *connect.ServerStream[v1.RunEvent]) error
@@ -971,6 +1005,18 @@ func NewPlatformServiceHandler(svc PlatformServiceHandler, opts ...connect.Handl
 		connect.WithSchema(platformServiceMethods.ByName("CreateApp")),
 		connect.WithHandlerOptions(opts...),
 	)
+	platformServiceUpdateAppHandler := connect.NewUnaryHandler(
+		PlatformServiceUpdateAppProcedure,
+		svc.UpdateApp,
+		connect.WithSchema(platformServiceMethods.ByName("UpdateApp")),
+		connect.WithHandlerOptions(opts...),
+	)
+	platformServiceDeleteAppHandler := connect.NewUnaryHandler(
+		PlatformServiceDeleteAppProcedure,
+		svc.DeleteApp,
+		connect.WithSchema(platformServiceMethods.ByName("DeleteApp")),
+		connect.WithHandlerOptions(opts...),
+	)
 	platformServiceListDeploysHandler := connect.NewUnaryHandler(
 		PlatformServiceListDeploysProcedure,
 		svc.ListDeploys,
@@ -1129,6 +1175,10 @@ func NewPlatformServiceHandler(svc PlatformServiceHandler, opts ...connect.Handl
 			platformServiceShowAppHandler.ServeHTTP(w, r)
 		case PlatformServiceCreateAppProcedure:
 			platformServiceCreateAppHandler.ServeHTTP(w, r)
+		case PlatformServiceUpdateAppProcedure:
+			platformServiceUpdateAppHandler.ServeHTTP(w, r)
+		case PlatformServiceDeleteAppProcedure:
+			platformServiceDeleteAppHandler.ServeHTTP(w, r)
 		case PlatformServiceListDeploysProcedure:
 			platformServiceListDeploysHandler.ServeHTTP(w, r)
 		case PlatformServiceGetDeployProcedure:
@@ -1278,6 +1328,14 @@ func (UnimplementedPlatformServiceHandler) ShowApp(context.Context, *connect.Req
 
 func (UnimplementedPlatformServiceHandler) CreateApp(context.Context, *connect.Request[v1.CreateAppRequest]) (*connect.Response[v1.App], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.CreateApp is not implemented"))
+}
+
+func (UnimplementedPlatformServiceHandler) UpdateApp(context.Context, *connect.Request[v1.UpdateAppRequest]) (*connect.Response[v1.App], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.UpdateApp is not implemented"))
+}
+
+func (UnimplementedPlatformServiceHandler) DeleteApp(context.Context, *connect.Request[v1.DeleteAppRequest]) (*connect.Response[v1.DeleteAppResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.DeleteApp is not implemented"))
 }
 
 func (UnimplementedPlatformServiceHandler) ListDeploys(context.Context, *connect.Request[v1.ListDeploysRequest]) (*connect.Response[v1.ListDeploysResponse], error) {

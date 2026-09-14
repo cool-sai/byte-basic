@@ -5,3 +5,5 @@ cd "$root"
 export PATH="$(go env GOPATH)/bin:$PATH"
 buf generate
 rm -rf gen/google
+rm -rf platform/web/src/gen/home
+rm -rf home/web/src/gen/platform

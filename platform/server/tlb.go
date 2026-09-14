@@ -173,6 +173,7 @@ func seedTlb(db *sql.DB) error {
 			consoleID, "platform-connect", "/minikitex/platform.v1.PlatformService", "platform:8081",
 		)
 		migrateTlbMinikite(db)
+		seedTlbHome(db, consoleID)
 		return nil
 	}
 	for _, r := range []tlbRoute{
@@ -180,12 +181,16 @@ func seedTlb(db *sql.DB) error {
 		{Name: "platform-connect", Path: "/minikitex/platform.v1.PlatformService", Target: "platform:8081"},
 		{Name: "order", Path: "/order", Target: "order:8080"},
 		{Name: "platform-web", Path: "/minikitex", Target: "platform-web:80"},
+		{Name: "home-api", Path: "/api", Target: "home:80"},
+		{Name: "home-connect", Path: "/home.v1.HomeService", Target: "home:80"},
+		{Name: "home-web", Path: "/", Target: "home-web:80"},
 	} {
 		if _, err := db.Exec(`INSERT INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`, consoleID, r.Name, r.Path, r.Target); err != nil {
 			return err
 		}
 	}
 	migrateTlbMinikite(db)
+	seedTlbHome(db, consoleID)
 	return nil
 }
 
@@ -193,6 +198,22 @@ func migrateTlbMinikite(db *sql.DB) {
 	_, _ = db.Exec(`UPDATE tlb_route SET path_prefix='/minikitex/api' WHERE name='platform-api' AND path_prefix IN ('/api','/minikite/api')`)
 	_, _ = db.Exec(`UPDATE tlb_route SET path_prefix='/minikitex/platform.v1.PlatformService' WHERE name='platform-connect' AND path_prefix IN ('/platform.v1.PlatformService','/minikite/platform.v1.PlatformService')`)
 	_, _ = db.Exec(`UPDATE tlb_route SET path_prefix='/minikitex' WHERE name='platform-web' AND path_prefix IN ('/','/minikite')`)
+}
+
+func seedTlbHome(db *sql.DB, consoleID int64) {
+	_, _ = db.Exec(
+		`INSERT IGNORE INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`,
+		consoleID, "home-api", "/api", "home:80",
+	)
+	_, _ = db.Exec(
+		`INSERT IGNORE INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`,
+		consoleID, "home-connect", "/home.v1.HomeService", "home:80",
+	)
+	_, _ = db.Exec(
+		`INSERT IGNORE INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`,
+		consoleID, "home-web", "/", "home-web:80",
+	)
+	_, _ = db.Exec(`UPDATE tlb_route SET target='home:80' WHERE name IN ('home-api','home-connect') AND target='home:8082'`)
 }
 
 func (s *server) getTlbSite(name string) (tlbSite, error) {
@@ -591,6 +612,8 @@ func (s *server) ListTlbUpstreams(context.Context, *connect.Request[v1.ListTlbUp
 	}
 	add("platform")
 	add("platform-web")
+	add("home")
+	add("home-web")
 	add("order")
 	if out, err := s.compose("config", "--services"); err == nil {
 		for _, line := range strings.Split(out, "\n") {

@@ -94,6 +94,12 @@ service PlatformService {
   rpc CreateApp(CreateAppRequest) returns (App) {
     option (google.api.http) = { post: "/api/deploy/apps" body: "*" };
   }
+  rpc UpdateApp(UpdateAppRequest) returns (App) {
+    option (google.api.http) = { put: "/api/deploy/apps/{name}" body: "*" };
+  }
+  rpc DeleteApp(DeleteAppRequest) returns (DeleteAppResponse) {
+    option (google.api.http) = { delete: "/api/deploy/apps/{name}" };
+  }
   rpc ListDeploys(ListDeploysRequest) returns (ListDeploysResponse) {
     option (google.api.http) = { get: "/api/deploys" };
   }
@@ -419,6 +425,17 @@ message CreateAppRequest {
   string name = 1;
   string scm_name = 2;
   string compose = 3;
+}
+message UpdateAppRequest {
+  string name = 1;
+  string scm_name = 2;
+  string compose = 3;
+}
+message DeleteAppRequest {
+  string name = 1;
+}
+message DeleteAppResponse {
+  string name = 1;
 }
 
 message Deploy {

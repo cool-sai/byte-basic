@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  --color-page: #f4f6f8;
+  --color-ink: #111827;
+  --color-mute: #667085;
+  --color-line: rgba(16, 24, 40, 0.08);
+  --color-accent: #0f766e;
+}

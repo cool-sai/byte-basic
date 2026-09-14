@@ -506,6 +506,9 @@ export const api = {
   deployApp: (name: string) => client.showApp({ name }).then(app),
   createDeployApp: (name: string, scmName: string, compose: string) =>
     client.createApp({ name, scmName, compose }).then(app),
+  updateDeployApp: (name: string, scmName: string, compose: string) =>
+    client.updateApp({ name, scmName, compose }).then(app),
+  deleteDeployApp: (name: string) => client.deleteApp({ name }),
   deploys: (service?: string) =>
     client.listDeploys(service ? { service } : {}).then((r) => r.deploys.map(deploy)),
   deployDetail: (id: number) => client.getDeploy({ id: BigInt(id) }).then(deploy),

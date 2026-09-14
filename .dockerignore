@@ -2,4 +2,8 @@ artifacts
 scm-work
 platform/web/node_modules
 platform/web/dist
+home/web/node_modules
+home/web/dist
+projects/agent-web/node_modules
+projects/agent-web/dist
 .git
