@@ -1,22 +1,26 @@
+import { lazy, Suspense } from "react";
 import { Button } from "@arco-design/web-react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import Login from "./pages/Login";
-import SCM from "./pages/SCM";
-import JobList from "./pages/scm/JobList";
-import JobPage from "./pages/scm/JobPage";
-import BuildPage from "./pages/scm/BuildPage";
-import BAM from "./pages/BAM";
-import ModuleList from "./pages/bam/ModuleList";
-import ModulePage from "./pages/bam/ModulePage";
-import AGW from "./pages/AGW";
-import TLB from "./pages/TLB";
-import SiteList from "./pages/tlb/SiteList";
-import SitePage from "./pages/tlb/SitePage";
-import Deploy from "./pages/Deploy";
-import AppList from "./pages/deploy/AppList";
-import AppPage from "./pages/deploy/AppPage";
-import RunPage from "./pages/deploy/RunPage";
-import DB from "./pages/DB";
+
+const Login = lazy(() => import("./pages/Login"));
+const SCM = lazy(() => import("./pages/SCM"));
+const JobList = lazy(() => import("./pages/scm/JobList"));
+const JobPage = lazy(() => import("./pages/scm/JobPage"));
+const BuildPage = lazy(() => import("./pages/scm/BuildPage"));
+const BAM = lazy(() => import("./pages/BAM"));
+const ModuleList = lazy(() => import("./pages/bam/ModuleList"));
+const ModulePage = lazy(() => import("./pages/bam/ModulePage"));
+const AGW = lazy(() => import("./pages/AGW"));
+const TLB = lazy(() => import("./pages/TLB"));
+const SiteList = lazy(() => import("./pages/tlb/SiteList"));
+const SitePage = lazy(() => import("./pages/tlb/SitePage"));
+const Deploy = lazy(() => import("./pages/Deploy"));
+const AppList = lazy(() => import("./pages/deploy/AppList"));
+const AppPage = lazy(() => import("./pages/deploy/AppPage"));
+const RunPage = lazy(() => import("./pages/deploy/RunPage"));
+const DB = lazy(() => import("./pages/DB"));
+
+const fallback = <p className="meta">加载中</p>;
 
 const TABS = [
   ["scm", "01", "SCM"],
@@ -36,7 +40,11 @@ export default function App() {
     if (token) {
       return <Navigate to="/scm" replace />;
     }
-    return <Login />;
+    return (
+      <Suspense fallback={fallback}>
+        <Login />
+      </Suspense>
+    );
   }
   if (!token) {
     return <Navigate to="/login" replace />;
@@ -76,29 +84,31 @@ export default function App() {
         </div>
       </aside>
       <main className="stage">
-        <Routes>
-          <Route path="/" element={<Navigate to="/scm" replace />} />
-          <Route path="/scm" element={<SCM />}>
-            <Route index element={<JobList />} />
-            <Route path=":name" element={<JobPage />} />
-            <Route path=":name/builds/:id" element={<BuildPage />} />
-          </Route>
-          <Route path="/bam" element={<BAM />}>
-            <Route index element={<ModuleList />} />
-            <Route path=":name" element={<ModulePage />} />
-          </Route>
-          <Route path="/agw" element={<AGW />} />
-          <Route path="/tlb" element={<TLB />}>
-            <Route index element={<SiteList />} />
-            <Route path=":name" element={<SitePage />} />
-          </Route>
-          <Route path="/deploy" element={<Deploy />}>
-            <Route index element={<AppList />} />
-            <Route path=":name" element={<AppPage />} />
-            <Route path=":name/runs/:id" element={<RunPage />} />
-          </Route>
-          <Route path="/db" element={<DB />} />
-        </Routes>
+        <Suspense fallback={fallback}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/scm" replace />} />
+            <Route path="/scm" element={<SCM />}>
+              <Route index element={<JobList />} />
+              <Route path=":name" element={<JobPage />} />
+              <Route path=":name/builds/:id" element={<BuildPage />} />
+            </Route>
+            <Route path="/bam" element={<BAM />}>
+              <Route index element={<ModuleList />} />
+              <Route path=":name" element={<ModulePage />} />
+            </Route>
+            <Route path="/agw" element={<AGW />} />
+            <Route path="/tlb" element={<TLB />}>
+              <Route index element={<SiteList />} />
+              <Route path=":name" element={<SitePage />} />
+            </Route>
+            <Route path="/deploy" element={<Deploy />}>
+              <Route index element={<AppList />} />
+              <Route path=":name" element={<AppPage />} />
+              <Route path=":name/runs/:id" element={<RunPage />} />
+            </Route>
+            <Route path="/db" element={<DB />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );
