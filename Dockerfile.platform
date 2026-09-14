@@ -24,4 +24,6 @@ COPY --from=api /go/bin/ /usr/local/bin/
 RUN npm install --prefix /opt/buf-es @bufbuild/protoc-gen-es@2.13.0 --registry=https://registry.npmmirror.com --fetch-retries=8
 WORKDIR /work
 ENV TZ=Asia/Shanghai
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOSUMDB=sum.golang.google.cn
 ENTRYPOINT ["/usr/local/bin/platform"]

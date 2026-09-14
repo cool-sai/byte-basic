@@ -169,6 +169,8 @@ services:
       TZ: Asia/Shanghai
       TLB_TLS_NAME: ${TLB_TLS_NAME:-}
       SCM_GIT_URL: ${SCM_GIT_URL:-https://github.com/cool-sai/byte-basic.git}
+      GOPROXY: https://goproxy.cn,direct
+      GOSUMDB: sum.golang.google.cn
     ports:
       - "8081:8081"
     volumes:
