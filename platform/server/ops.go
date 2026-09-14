@@ -1149,6 +1149,11 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
     sendfile on;
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 256;
+    gzip_comp_level 5;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/xml image/svg+xml;
     server {
         listen 80;
         root /usr/share/nginx/html;

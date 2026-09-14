@@ -198,6 +198,7 @@ func migrateTlbMinikite(db *sql.DB) {
 	_, _ = db.Exec(`UPDATE tlb_route SET path_prefix='/minikitex/api' WHERE name='platform-api' AND path_prefix IN ('/api','/minikite/api')`)
 	_, _ = db.Exec(`UPDATE tlb_route SET path_prefix='/minikitex/platform.v1.PlatformService' WHERE name='platform-connect' AND path_prefix IN ('/platform.v1.PlatformService','/minikite/platform.v1.PlatformService')`)
 	_, _ = db.Exec(`UPDATE tlb_route SET path_prefix='/minikitex' WHERE name='platform-web' AND path_prefix IN ('/','/minikite')`)
+	_, _ = db.Exec(`UPDATE tlb_route SET target='platform-web:80' WHERE name='platform-web' AND target IN ('platform:8081','platform:80')`)
 }
 
 func seedTlbHome(db *sql.DB, consoleID int64) {
@@ -517,18 +518,20 @@ http {
 		if i == 0 {
 			listen = "listen 80 default_server;"
 		}
+		extra := ""
 		if tlbTLSOn() {
 			listen = "listen 443 ssl;"
 			if i == 0 {
 				listen = "listen 443 ssl default_server;"
 			}
+			extra = "\n        http2 on;"
 		}
 		fmt.Fprintf(&b, `
     server {
-        %s
+        %s%s
         server_name %s;
         client_max_body_size 32m;
-`, listen, st.Host)
+`, listen, extra, st.Host)
 		if tlbTLSOn() {
 			dir := tlbTLSDir()
 			fmt.Fprintf(&b, `        ssl_certificate %s/fullchain.pem;
