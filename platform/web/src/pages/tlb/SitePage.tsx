@@ -13,13 +13,15 @@ export default function SitePage() {
   const [routeName, setRouteName] = useState("");
   const [path, setPath] = useState("");
   const [target, setTarget] = useState("");
+  const [hostEdit, setHostEdit] = useState("");
 
   const { data, loading, error, refresh } = useRequest(() => api.tlbSite(name), {
     refreshDeps: [name, loc.key],
+    onSuccess: (d) => setHostEdit(d.host),
   });
   const { data: upData } = useRequest(() => api.tlbUpstreams());
   const routes = data?.routes || [];
-  const host = data?.host || name + ".ls-byte-basic.com";
+  const host = data?.host || hostEdit || name;
   const upstreams = upData?.upstreams || [];
 
   const { runAsync: save, loading: saving } = useRequest(
@@ -52,6 +54,16 @@ export default function SitePage() {
     onError: (e) => Message.error(errMsg(e)),
   });
 
+  const { runAsync: saveHost, loading: hostSaving } = useRequest((h: string) => api.updateTlbSite(name, h), {
+    manual: true,
+    onSuccess: (d) => {
+      Message.success("域名已改为 " + d.host);
+      setHostEdit(d.host);
+      void refresh();
+    },
+    onError: (e) => Message.error(errMsg(e)),
+  });
+
   const openCreate = () => {
     setEditing(null);
     setRouteName("");
@@ -79,6 +91,16 @@ export default function SitePage() {
           <Typography.Text type="secondary">
             这个域名下的路径转到哪些服务。改完回列表或这里点发布。
           </Typography.Text>
+          <div className="mt-3 flex max-w-xl items-center gap-2">
+            <Input addBefore="域名" value={hostEdit} onChange={setHostEdit} placeholder="lssl.work" />
+            <Button
+              loading={hostSaving}
+              disabled={!hostEdit.trim() || hostEdit.trim() === host}
+              onClick={() => void saveHost(hostEdit.trim())}
+            >
+              保存
+            </Button>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button onClick={openCreate}>新建路由</Button>

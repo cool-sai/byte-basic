@@ -1,13 +1,4 @@
-# 控制台：前端静态页 + API。运行时还要 git/go（SCM 拉代码编译）和 docker CLI（部署）。
-FROM alpine:3.20 AS web
-RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
- && apk add --no-cache nodejs npm
-WORKDIR /web
-COPY platform/web/package.json platform/web/package-lock.json ./
-RUN npm ci --registry=https://registry.npmmirror.com --fetch-retries=8 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
-COPY platform/web/ ./
-RUN npm run build
-
+# 控制台 API + 编译机（git/go/node/docker）。前端走 platform-web。
 FROM alpine:3.20 AS api
 RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
  && apk add --no-cache go git ca-certificates
@@ -30,9 +21,7 @@ RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories
  && apk add --no-cache git go nodejs npm docker-cli docker-cli-compose ca-certificates tzdata
 COPY --from=api /usr/local/bin/platform /usr/local/bin/platform
 COPY --from=api /go/bin/ /usr/local/bin/
-COPY --from=web /web/dist /web
 RUN npm install --prefix /opt/buf-es @bufbuild/protoc-gen-es@2.13.0 --registry=https://registry.npmmirror.com --fetch-retries=8
 WORKDIR /work
-ENV WEB_DIR=/web
 ENV TZ=Asia/Shanghai
 ENTRYPOINT ["/usr/local/bin/platform"]

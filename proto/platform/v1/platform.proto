@@ -126,6 +126,9 @@ service PlatformService {
   rpc CreateTlbSite(CreateTlbSiteRequest) returns (TlbSite) {
     option (google.api.http) = { post: "/api/tlb/sites" body: "*" };
   }
+  rpc UpdateTlbSite(UpdateTlbSiteRequest) returns (TlbSite) {
+    option (google.api.http) = { put: "/api/tlb/sites/{name}" body: "*" };
+  }
   rpc ShowTlbSite(ShowTlbSiteRequest) returns (TlbSiteDetail) {
     option (google.api.http) = { get: "/api/tlb/sites/{name}" };
   }
@@ -526,6 +529,11 @@ message ListTlbSitesResponse {
 }
 message CreateTlbSiteRequest {
   string name = 1;
+  string host = 2;
+}
+message UpdateTlbSiteRequest {
+  string name = 1;
+  string host = 2;
 }
 message ShowTlbSiteRequest {
   string name = 1;

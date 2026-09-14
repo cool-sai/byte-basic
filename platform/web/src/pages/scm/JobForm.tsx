@@ -3,7 +3,7 @@ import { Input, Modal, Select, Typography } from "@arco-design/web-react";
 import type { ScmJob } from "../../api";
 import LabelIcon from "./LabelIcon";
 
-const LABELS = ["golang", "node", "python"];
+const LABELS = ["golang", "node", "python", "image"];
 
 export default function JobForm({
   visible,
@@ -66,7 +66,7 @@ export default function JobForm({
           ))}
         </Select>
         <Typography.Text type="secondary">
-          golang = 二进制；node = 静态站；python = Flask。示例：projects/agent-web/build.sh、projects/agent-server/build.sh、projects/agent-python/build.sh
+          golang = 二进制；node = 静态站；python = Flask；image = 仓库里的 Dockerfile（脚本填 Dockerfile.platform 这种路径）。
         </Typography.Text>
       </div>
     </Modal>

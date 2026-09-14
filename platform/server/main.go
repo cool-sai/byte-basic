@@ -54,6 +54,9 @@ func main() {
 	if err := s.seedBam(); err != nil {
 		log.Fatal(err)
 	}
+	if err := s.seedRelease(); err != nil {
+		log.Fatal(err)
+	}
 	addr := getenv("LISTEN", "127.0.0.1:8081")
 	log.Fatal(s.serveHTTP(addr))
 }

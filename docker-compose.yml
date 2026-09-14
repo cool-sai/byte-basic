@@ -165,10 +165,10 @@ services:
     environment:
       LISTEN: "0.0.0.0:8081"
       MYSQL: "root:minikitex@tcp(mysql:3306)/minikitex?parseTime=true&charset=utf8mb4"
-      WEB_DIR: /web
       HOST_ROOT: ${PWD}
       TZ: Asia/Shanghai
       TLB_TLS_NAME: ${TLB_TLS_NAME:-}
+      SCM_GIT_URL: ${SCM_GIT_URL:-https://github.com/cool-sai/byte-basic.git}
     ports:
       - "8081:8081"
     volumes:
@@ -182,6 +182,17 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+
+  platform-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: minikitex-platform-web:local
+    hostname: platform-web
+    labels:
+      psm: platform-web
+    expose:
+      - "80"
 
   # TLB：对外 HTTP 入口，按路径转到前端 / 平台 API / 各服务 AGW。
   tlb:
@@ -201,6 +212,7 @@ services:
       - letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - platform
+      - platform-web
 
   mysql:
     image: mysql:8.0.40

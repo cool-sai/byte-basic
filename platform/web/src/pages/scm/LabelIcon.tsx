@@ -20,6 +20,16 @@ export default function LabelIcon({ label, size = 20 }: { label?: string; size?:
       </svg>
     );
   }
+  if (label === "image") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" aria-label="image" className="shrink-0">
+        <rect width="24" height="24" rx="6" fill="#2496ED" />
+        <text x="12" y="16.5" textAnchor="middle" fill="#fff" fontSize="9" fontFamily="ui-sans-serif, system-ui, sans-serif" fontWeight="700">
+          img
+        </text>
+      </svg>
+    );
+  }
   if (label === "python") {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" aria-label="python" className="shrink-0">

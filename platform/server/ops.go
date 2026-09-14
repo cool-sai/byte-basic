@@ -539,6 +539,22 @@ func (s *server) runBuild(id int64, job scmJob, branch, ver, binPath string, liv
 		save("fail", commit, err)
 		return
 	}
+	if job.Label == "image" {
+		fmt.Fprintf(live, "$ git archive HEAD -> %s\n", binPath)
+		cmd := exec.Command("git", "-C", repo, "archive", "--format=tar", "-o", binPath, "HEAD")
+		cmd.Stdout = live
+		cmd.Stderr = live
+		err = cmd.Run()
+		status := "ok"
+		if err != nil {
+			status = "fail"
+		} else if _, stErr := os.Stat(binPath); stErr != nil {
+			status = "fail"
+			err = fmt.Errorf("git archive missing %s", binPath)
+		}
+		save(status, commit, err)
+		return
+	}
 	arch := dockerArch()
 	fmt.Fprintf(live, "$ sh %s\n(dir=%s out=%s)\n", job.ScriptPath, repo, outDir)
 	cmd := exec.Command("/bin/sh", job.ScriptPath)
@@ -876,6 +892,16 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 			finish("fail", err)
 			return
 		}
+	} else if label == "image" {
+		job, err := s.getJob(app.ScmName)
+		if err != nil {
+			finish("fail", err)
+			return
+		}
+		if err := s.buildImageArtifact(live, src, job.ScriptPath, imageVer, imageLocal); err != nil {
+			finish("fail", err)
+			return
+		}
 	} else {
 		fmt.Fprintf(live, "(context %s)\n", filepath.Dir(src))
 		cmd := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, "-f", "-", filepath.Dir(src))
@@ -891,9 +917,8 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 		finish("fail", err)
 		return
 	}
-	upArgs := append([]string{"up", "--no-deps", "--force-recreate", "-d"}, app.Compose...)
 	fmt.Fprintf(live, "$ docker compose up --no-deps --force-recreate -d %s\n", strings.Join(app.Compose, " "))
-	if err := s.composeTo(live, upArgs...); err != nil {
+	if err := s.composeUp(live, app.Compose); err != nil {
 		finish("fail", err)
 		return
 	}
@@ -958,6 +983,65 @@ func (s *server) composeTo(w io.Writer, args ...string) error {
 	return cmd.Run()
 }
 
+func (s *server) composeUp(w io.Writer, services []string) error {
+	args := append([]string{"up", "--no-deps", "--force-recreate", "-d"}, services...)
+	for _, svc := range services {
+		if svc == "platform" {
+			return s.composeSidecar(w, args...)
+		}
+	}
+	return s.composeTo(w, args...)
+}
+
+func (s *server) hostRoot() string {
+	if h := strings.TrimSpace(os.Getenv("HOST_ROOT")); h != "" {
+		return h
+	}
+	return s.root
+}
+
+func (s *server) composeSidecar(w io.Writer, args ...string) error {
+	root := s.hostRoot()
+	fmt.Fprint(w, "$ docker run --rm compose-sidecar\n")
+	composeArgs := []string{"compose"}
+	if _, err := os.Stat(filepath.Join(s.root, "deploy", "runtime.yml")); err == nil {
+		composeArgs = append(composeArgs, "-f", "docker-compose.yml", "-f", "deploy/runtime.yml")
+	}
+	composeArgs = append(composeArgs, args...)
+	cmd := exec.Command("docker", append([]string{
+		"run", "--rm",
+		"-v", "/var/run/docker.sock:/var/run/docker.sock",
+		"-v", root + ":" + root,
+		"-w", root,
+		"--entrypoint", "docker",
+		"minikitex-platform:local",
+	}, composeArgs...)...)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	return cmd.Run()
+}
+
+func (s *server) buildImageArtifact(lg io.Writer, src, dockerfile, imageVer, imageLocal string) error {
+	tmp, err := os.MkdirTemp("", "mk-img-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	fmt.Fprintf(lg, "unpack %s\n", src)
+	untar := exec.Command("tar", "-xf", src, "-C", tmp)
+	untar.Stdout = lg
+	untar.Stderr = lg
+	if err := untar.Run(); err != nil {
+		return fmt.Errorf("unpack image artifact: %w", err)
+	}
+	fmt.Fprintf(lg, "$ docker build -f %s\n", dockerfile)
+	build := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, "-f", dockerfile, ".")
+	build.Dir = tmp
+	build.Stdout = lg
+	build.Stderr = lg
+	return build.Run()
+}
+
 const nodeWebDockerfile = `FROM alpine:3.20
 RUN apk add --no-cache nginx && mkdir -p /run/nginx
 COPY html /usr/share/nginx/html
@@ -979,7 +1063,21 @@ http {
     server {
         listen 80;
         root /usr/share/nginx/html;
+        location /minikitex/assets/ {
+            add_header Cache-Control "public, max-age=31536000, immutable";
+        }
+        location = /minikitex {
+            return 302 /minikitex/;
+        }
+        location /minikitex/ {
+            add_header Cache-Control "no-cache";
+            try_files $uri $uri/ /minikitex/index.html;
+        }
+        location /assets/ {
+            add_header Cache-Control "public, max-age=31536000, immutable";
+        }
         location / {
+            add_header Cache-Control "no-cache";
             try_files $uri $uri/ /index.html;
         }
     }
@@ -1003,7 +1101,13 @@ func (s *server) buildNodeImage(lg io.Writer, src, imageVer, imageLocal string) 
 	if err := untar.Run(); err != nil {
 		return fmt.Errorf("unpack node artifact: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "nginx.conf"), []byte(nodeWebNginx), 0o644); err != nil {
+	conf := []byte(nodeWebNginx)
+	if _, err := os.Stat(filepath.Join(html, "minikitex")); err == nil {
+		if b, err := os.ReadFile(filepath.Join(s.root, "platform/web/nginx.conf")); err == nil {
+			conf = b
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "nginx.conf"), conf, 0o644); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(tmp, "Dockerfile"), []byte(nodeWebDockerfile), 0o644); err != nil {
@@ -1083,7 +1187,7 @@ func (s *server) syncRuntimeCompose() error {
 			label = "golang"
 		}
 		if label != "node" && label != "golang" {
-			if label != "python" {
+			if label != "python" && label != "image" {
 				continue
 			}
 		}
@@ -1120,6 +1224,47 @@ func (s *server) syncRuntimeCompose() error {
 		}
 	}
 	return os.WriteFile(path, []byte(y.String()), 0o644)
+}
+
+func seedGitURL(root string) string {
+	if u := strings.TrimSpace(os.Getenv("SCM_GIT_URL")); u != "" {
+		return u
+	}
+	out, err := exec.Command("git", "-C", root, "remote", "get-url", "origin").Output()
+	if err == nil {
+		if u := strings.TrimSpace(string(out)); u != "" {
+			return u
+		}
+	}
+	return "https://github.com/cool-sai/byte-basic.git"
+}
+
+func (s *server) seedRelease() error {
+	url := seedGitURL(s.root)
+	jobs := []struct{ name, script, label, app, compose string }{
+		{"platform-web", "scripts/scm/platform-web.sh", "node", "platform-web", "platform-web"},
+		{"platform-api", "Dockerfile.platform", "image", "platform", "platform"},
+		{"tlb", "Dockerfile.tlb", "image", "tlb", "tlb"},
+		{"user", "scripts/scm/user.sh", "golang", "user", "user"},
+		{"order", "scripts/scm/order.sh", "golang", "order", "order"},
+		{"gateway", "scripts/scm/gateway.sh", "golang", "gateway", "gateway"},
+		{"etcdui", "scripts/scm/etcdui.sh", "golang", "etcdui", "etcdui"},
+	}
+	for _, j := range jobs {
+		if _, err := s.db.Exec(
+			`INSERT IGNORE INTO scm_job (name, repo_dir, script_path, label) VALUES (?,?,?,?)`,
+			j.name, url, j.script, j.label,
+		); err != nil {
+			return fmt.Errorf("seed scm %s: %w", j.name, err)
+		}
+		if _, err := s.db.Exec(
+			`INSERT IGNORE INTO deploy_app (name, scm_name, compose) VALUES (?,?,?)`,
+			j.app, j.name, j.compose,
+		); err != nil {
+			return fmt.Errorf("seed deploy %s: %w", j.app, err)
+		}
+	}
+	return nil
 }
 
 func dockerArch() string {

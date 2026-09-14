@@ -6,4 +6,8 @@ set -e
 cd platform/web
 npm ci
 npm run build
-tar -C dist -cf "$SCM_OUT/$SCM_NAME" .
+stage=$(mktemp -d)
+mkdir -p "$stage/minikitex"
+cp -R dist/. "$stage/minikitex/"
+tar -C "$stage" -cf "$SCM_OUT/$SCM_NAME" .
+rm -rf "$stage"

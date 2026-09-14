@@ -16,11 +16,12 @@ import (
 	v1 "minikitex/gen/platform/v1"
 )
 
-const tlbZone = "ls-byte-basic.com"
+const tlbZoneDefault = "ls-byte-basic.com"
 
 var tlbPath = regexp.MustCompile(`^/[A-Za-z0-9._/-]*$`)
 var tlbTarget = regexp.MustCompile(`^[A-Za-z0-9._-]+:[0-9]+$`)
 var tlbSub = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+var tlbHostName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
 type tlbSite struct {
 	ID   int64
@@ -58,13 +59,86 @@ func checkTlbTarget(t string) (string, error) {
 func checkTlbSub(name string) (string, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if !tlbSub.MatchString(name) {
-		return "", fmt.Errorf("三级域名只允许小写字母数字和 -")
+		return "", fmt.Errorf("名称只允许小写字母数字和 -")
 	}
 	return name, nil
 }
 
+func tlbZone() string {
+	if z := strings.TrimSpace(os.Getenv("TLB_ZONE")); z != "" {
+		return strings.ToLower(z)
+	}
+	if z := strings.TrimSpace(os.Getenv("TLB_TLS_NAME")); z != "" {
+		return strings.ToLower(z)
+	}
+	return tlbZoneDefault
+}
+
 func tlbHost(name string) string {
-	return name + "." + tlbZone
+	return name + "." + tlbZone()
+}
+
+func checkTlbHost(s string) (string, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	parts := strings.Fields(s)
+	if len(parts) == 0 {
+		return "", fmt.Errorf("请填写域名")
+	}
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSuffix(p, ".")
+		if strings.ContainsAny(p, "/:@") || !tlbHostName.MatchString(p) {
+			return "", fmt.Errorf("域名写成 lssl.work 或 order.example.com")
+		}
+		out = append(out, p)
+	}
+	return strings.Join(out, " "), nil
+}
+
+func tlbNameFromHost(host string) string {
+	host = strings.Fields(host)[0]
+	if i := strings.IndexByte(host, '.'); i > 0 {
+		return host[:i]
+	}
+	return host
+}
+
+func tlbSiteFromInput(name, host string) (string, string, error) {
+	name = strings.TrimSpace(name)
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		n, err := checkTlbSub(name)
+		if err != nil {
+			return "", "", err
+		}
+		return n, tlbHost(n), nil
+	}
+	if !strings.Contains(host, ".") {
+		sub, err := checkTlbSub(host)
+		if err != nil {
+			return "", "", err
+		}
+		if name == "" {
+			name = sub
+		}
+		n, err := checkTlbSub(name)
+		if err != nil {
+			return "", "", err
+		}
+		return n, tlbHost(sub), nil
+	}
+	h, err := checkTlbHost(host)
+	if err != nil {
+		return "", "", err
+	}
+	if name == "" {
+		name = tlbNameFromHost(h)
+	}
+	n, err := checkTlbSub(name)
+	if err != nil {
+		return "", "", err
+	}
+	return n, h, nil
 }
 
 func seedTlb(db *sql.DB) error {
@@ -73,7 +147,11 @@ func seedTlb(db *sql.DB) error {
 		return err
 	}
 	if n == 0 {
-		if _, err := db.Exec(`INSERT INTO tlb_site (name, host) VALUES (?,?)`, "console", tlbHost("console")); err != nil {
+		host := tlbHost("console")
+		if tls := strings.TrimSpace(os.Getenv("TLB_TLS_NAME")); tls != "" {
+			host = strings.ToLower(tls)
+		}
+		if _, err := db.Exec(`INSERT INTO tlb_site (name, host) VALUES (?,?)`, "console", host); err != nil {
 			return err
 		}
 	}
@@ -92,21 +170,29 @@ func seedTlb(db *sql.DB) error {
 	if n > 0 {
 		_, _ = db.Exec(
 			`INSERT IGNORE INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`,
-			consoleID, "platform-connect", "/platform.v1.PlatformService", "platform:8081",
+			consoleID, "platform-connect", "/minikitex/platform.v1.PlatformService", "platform:8081",
 		)
+		migrateTlbMinikite(db)
 		return nil
 	}
 	for _, r := range []tlbRoute{
-		{Name: "platform-api", Path: "/api", Target: "platform:8081"},
-		{Name: "platform-connect", Path: "/platform.v1.PlatformService", Target: "platform:8081"},
+		{Name: "platform-api", Path: "/minikitex/api", Target: "platform:8081"},
+		{Name: "platform-connect", Path: "/minikitex/platform.v1.PlatformService", Target: "platform:8081"},
 		{Name: "order", Path: "/order", Target: "order:8080"},
-		{Name: "platform-web", Path: "/", Target: "platform:8081"},
+		{Name: "platform-web", Path: "/minikitex", Target: "platform-web:80"},
 	} {
 		if _, err := db.Exec(`INSERT INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`, consoleID, r.Name, r.Path, r.Target); err != nil {
 			return err
 		}
 	}
+	migrateTlbMinikite(db)
 	return nil
+}
+
+func migrateTlbMinikite(db *sql.DB) {
+	_, _ = db.Exec(`UPDATE tlb_route SET path_prefix='/minikitex/api' WHERE name='platform-api' AND path_prefix IN ('/api','/minikite/api')`)
+	_, _ = db.Exec(`UPDATE tlb_route SET path_prefix='/minikitex/platform.v1.PlatformService' WHERE name='platform-connect' AND path_prefix IN ('/platform.v1.PlatformService','/minikite/platform.v1.PlatformService')`)
+	_, _ = db.Exec(`UPDATE tlb_route SET path_prefix='/minikitex' WHERE name='platform-web' AND path_prefix IN ('/','/minikite')`)
 }
 
 func (s *server) getTlbSite(name string) (tlbSite, error) {
@@ -144,7 +230,7 @@ func (s *server) ListTlbSites(context.Context, *connect.Request[v1.ListTlbSitesR
 	if err := rows.Err(); err != nil {
 		return nil, internal(err)
 	}
-	return connect.NewResponse(&v1.ListTlbSitesResponse{Sites: sites, Zone: tlbZone}), nil
+	return connect.NewResponse(&v1.ListTlbSitesResponse{Sites: sites, Zone: tlbZone()}), nil
 }
 
 func (s *server) ShowTlbSite(_ context.Context, req *connect.Request[v1.ShowTlbSiteRequest]) (*connect.Response[v1.TlbSiteDetail], error) {
@@ -171,22 +257,41 @@ func (s *server) ShowTlbSite(_ context.Context, req *connect.Request[v1.ShowTlbS
 		return nil, internal(err)
 	}
 	return connect.NewResponse(&v1.TlbSiteDetail{
-		Id: st.ID, Name: st.Name, Host: st.Host, Routes: routes, Zone: tlbZone,
+		Id: st.ID, Name: st.Name, Host: st.Host, Routes: routes, Zone: tlbZone(),
 	}), nil
 }
 
 func (s *server) CreateTlbSite(_ context.Context, req *connect.Request[v1.CreateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error) {
-	name, err := checkTlbSub(req.Msg.Name)
+	name, host, err := tlbSiteFromInput(req.Msg.Name, req.Msg.Host)
 	if err != nil {
 		return nil, invalid(err)
 	}
-	host := tlbHost(name)
 	res, err := s.db.Exec(`INSERT INTO tlb_site (name, host) VALUES (?,?)`, name, host)
 	if err != nil {
 		return nil, invalid(fmt.Errorf("create tlb site: %w", err))
 	}
 	id, _ := res.LastInsertId()
 	return connect.NewResponse(&v1.TlbSite{Id: id, Name: name, Host: host}), nil
+}
+
+func (s *server) UpdateTlbSite(_ context.Context, req *connect.Request[v1.UpdateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error) {
+	st, err := s.getTlbSite(req.Msg.Name)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	if strings.TrimSpace(req.Msg.Host) == "" {
+		return nil, invalid(fmt.Errorf("请填写域名"))
+	}
+	_, host, err := tlbSiteFromInput(st.Name, req.Msg.Host)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	if _, err := s.db.Exec(`UPDATE tlb_site SET host=? WHERE id=?`, host, st.ID); err != nil {
+		return nil, invalid(fmt.Errorf("update tlb site: %w", err))
+	}
+	var n int32
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM tlb_route WHERE site_id=?`, st.ID).Scan(&n)
+	return connect.NewResponse(&v1.TlbSite{Id: st.ID, Name: st.Name, Host: host, Routes: n}), nil
 }
 
 func (s *server) DeleteTlbSite(_ context.Context, req *connect.Request[v1.DeleteTlbSiteRequest]) (*connect.Response[v1.DeleteTlbSiteResponse], error) {
@@ -485,6 +590,7 @@ func (s *server) ListTlbUpstreams(context.Context, *connect.Request[v1.ListTlbUp
 		names[n] = true
 	}
 	add("platform")
+	add("platform-web")
 	add("order")
 	if out, err := s.compose("config", "--services"); err == nil {
 		for _, line := range strings.Split(out, "\n") {

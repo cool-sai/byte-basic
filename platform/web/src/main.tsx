@@ -13,7 +13,7 @@ if (!root) {
 createRoot(root).render(
   <StrictMode>
     <ConfigProvider locale={zhCN}>
-      <BrowserRouter>
+      <BrowserRouter basename="/minikitex">
         <App />
       </BrowserRouter>
     </ConfigProvider>

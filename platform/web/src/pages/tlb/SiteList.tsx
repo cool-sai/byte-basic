@@ -9,7 +9,7 @@ export default function SiteList() {
   const loc = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
+  const [host, setHost] = useState("");
 
   const { data, loading, error, refresh } = useRequest(
     async () => {
@@ -21,12 +21,12 @@ export default function SiteList() {
   const sites = data?.sites || [];
   const zone = data?.zone || "ls-byte-basic.com";
 
-  const { runAsync: create, loading: saving } = useRequest((n: string) => api.createTlbSite(n), {
+  const { runAsync: create, loading: saving } = useRequest((h: string) => api.createTlbSite(h), {
     manual: true,
-    onSuccess: (_d, [n]) => {
-      Message.success("已新建 " + n + "." + zone);
+    onSuccess: (d) => {
+      Message.success("已新建 " + d.host);
       setOpen(false);
-      setName("");
+      setHost("");
       void refresh();
     },
     onError: (e) => Message.error(errMsg(e)),
@@ -59,7 +59,7 @@ export default function SiteList() {
             TLB 配置
           </Typography.Title>
           <Typography.Text type="secondary">
-            一份三级域名一套路径规则。本机把 *.{zone} 指到 127.0.0.1 之后，用 http://console.{zone} 访问。没匹配到的 Host 走第一份配置，所以 :80 直连还可用。
+            一份配置对应一个域名（nginx server_name）。完整域名直接填，例如 lssl.work；只填一段会拼成 xxx.{zone}。没匹配到的 Host 走第一份配置。
           </Typography.Text>
         </div>
         <div className="flex items-center gap-2">
@@ -98,7 +98,7 @@ export default function SiteList() {
                 </Button>
               }
             >
-              <div className="meta">三级域名 {s.name}</div>
+              <div className="meta">名称 {s.name}</div>
               <div className="meta">路由 {s.routes} 条</div>
             </Card>
           ))}
@@ -109,13 +109,17 @@ export default function SiteList() {
         title="新建配置"
         visible={open}
         onCancel={() => setOpen(false)}
-        onOk={() => void create(name.trim())}
+        onOk={() => void create(host.trim())}
         confirmLoading={saving}
-        okButtonProps={{ disabled: !name.trim() }}
+        okButtonProps={{ disabled: !host.trim() }}
       >
         <div className="flex w-full flex-col gap-4">
-          <Input addBefore="三级域名" addAfter={"." + zone} value={name} onChange={setName} placeholder="order" />
-          <Typography.Text type="secondary">会生成 {name.trim() || "xxx"}.{zone}，点进配置里再加路径转到哪个服务。</Typography.Text>
+          <Input addBefore="域名" value={host} onChange={setHost} placeholder={"lssl.work 或 order." + zone} />
+          <Typography.Text type="secondary">
+            {host.includes(".") || !host.trim()
+              ? "点进配置里再加路径转到哪个服务。"
+              : `会生成 ${host.trim()}.${zone}，点进配置里再加路径转到哪个服务。`}
+          </Typography.Text>
         </div>
       </Modal>
     </div>

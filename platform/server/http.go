@@ -50,12 +50,37 @@ func (s *server) serveHTTP(addr string) error {
 				api.ServeHTTP(w, r)
 				return
 			}
+			w.Header().Set("Cache-Control", webCacheControl(r.URL.Path))
 			fs.ServeHTTP(w, r)
 		})
 	}
 	log.Println("platform", addr)
 	go s.watchBamGit()
-	return http.ListenAndServe(addr, h2c.NewHandler(h, &http2.Server{}))
+	return http.ListenAndServe(addr, h2c.NewHandler(withMinikite(h), &http2.Server{}))
+}
+
+func withMinikite(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path != "/minikitex" && !strings.HasPrefix(path, "/minikitex/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		p := strings.TrimPrefix(path, "/minikitex")
+		if p == "" {
+			p = "/"
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = p
+		next.ServeHTTP(w, r2)
+	})
+}
+
+func webCacheControl(path string) string {
+	if strings.HasPrefix(path, "/assets/") {
+		return "public, max-age=31536000, immutable"
+	}
+	return "no-cache"
 }
 
 type authInterceptor struct{}

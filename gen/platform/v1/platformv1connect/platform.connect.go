@@ -137,6 +137,9 @@ const (
 	// PlatformServiceCreateTlbSiteProcedure is the fully-qualified name of the PlatformService's
 	// CreateTlbSite RPC.
 	PlatformServiceCreateTlbSiteProcedure = "/platform.v1.PlatformService/CreateTlbSite"
+	// PlatformServiceUpdateTlbSiteProcedure is the fully-qualified name of the PlatformService's
+	// UpdateTlbSite RPC.
+	PlatformServiceUpdateTlbSiteProcedure = "/platform.v1.PlatformService/UpdateTlbSite"
 	// PlatformServiceShowTlbSiteProcedure is the fully-qualified name of the PlatformService's
 	// ShowTlbSite RPC.
 	PlatformServiceShowTlbSiteProcedure = "/platform.v1.PlatformService/ShowTlbSite"
@@ -196,6 +199,7 @@ type PlatformServiceClient interface {
 	ListTlbUpstreams(context.Context, *connect.Request[v1.ListTlbUpstreamsRequest]) (*connect.Response[v1.ListTlbUpstreamsResponse], error)
 	ListTlbSites(context.Context, *connect.Request[v1.ListTlbSitesRequest]) (*connect.Response[v1.ListTlbSitesResponse], error)
 	CreateTlbSite(context.Context, *connect.Request[v1.CreateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error)
+	UpdateTlbSite(context.Context, *connect.Request[v1.UpdateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error)
 	ShowTlbSite(context.Context, *connect.Request[v1.ShowTlbSiteRequest]) (*connect.Response[v1.TlbSiteDetail], error)
 	DeleteTlbSite(context.Context, *connect.Request[v1.DeleteTlbSiteRequest]) (*connect.Response[v1.DeleteTlbSiteResponse], error)
 	CreateTlbRoute(context.Context, *connect.Request[v1.CreateTlbRouteRequest]) (*connect.Response[v1.TlbRoute], error)
@@ -437,6 +441,12 @@ func NewPlatformServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(platformServiceMethods.ByName("CreateTlbSite")),
 			connect.WithClientOptions(opts...),
 		),
+		updateTlbSite: connect.NewClient[v1.UpdateTlbSiteRequest, v1.TlbSite](
+			httpClient,
+			baseURL+PlatformServiceUpdateTlbSiteProcedure,
+			connect.WithSchema(platformServiceMethods.ByName("UpdateTlbSite")),
+			connect.WithClientOptions(opts...),
+		),
 		showTlbSite: connect.NewClient[v1.ShowTlbSiteRequest, v1.TlbSiteDetail](
 			httpClient,
 			baseURL+PlatformServiceShowTlbSiteProcedure,
@@ -515,6 +525,7 @@ type platformServiceClient struct {
 	listTlbUpstreams *connect.Client[v1.ListTlbUpstreamsRequest, v1.ListTlbUpstreamsResponse]
 	listTlbSites     *connect.Client[v1.ListTlbSitesRequest, v1.ListTlbSitesResponse]
 	createTlbSite    *connect.Client[v1.CreateTlbSiteRequest, v1.TlbSite]
+	updateTlbSite    *connect.Client[v1.UpdateTlbSiteRequest, v1.TlbSite]
 	showTlbSite      *connect.Client[v1.ShowTlbSiteRequest, v1.TlbSiteDetail]
 	deleteTlbSite    *connect.Client[v1.DeleteTlbSiteRequest, v1.DeleteTlbSiteResponse]
 	createTlbRoute   *connect.Client[v1.CreateTlbRouteRequest, v1.TlbRoute]
@@ -708,6 +719,11 @@ func (c *platformServiceClient) CreateTlbSite(ctx context.Context, req *connect.
 	return c.createTlbSite.CallUnary(ctx, req)
 }
 
+// UpdateTlbSite calls platform.v1.PlatformService.UpdateTlbSite.
+func (c *platformServiceClient) UpdateTlbSite(ctx context.Context, req *connect.Request[v1.UpdateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error) {
+	return c.updateTlbSite.CallUnary(ctx, req)
+}
+
 // ShowTlbSite calls platform.v1.PlatformService.ShowTlbSite.
 func (c *platformServiceClient) ShowTlbSite(ctx context.Context, req *connect.Request[v1.ShowTlbSiteRequest]) (*connect.Response[v1.TlbSiteDetail], error) {
 	return c.showTlbSite.CallUnary(ctx, req)
@@ -777,6 +793,7 @@ type PlatformServiceHandler interface {
 	ListTlbUpstreams(context.Context, *connect.Request[v1.ListTlbUpstreamsRequest]) (*connect.Response[v1.ListTlbUpstreamsResponse], error)
 	ListTlbSites(context.Context, *connect.Request[v1.ListTlbSitesRequest]) (*connect.Response[v1.ListTlbSitesResponse], error)
 	CreateTlbSite(context.Context, *connect.Request[v1.CreateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error)
+	UpdateTlbSite(context.Context, *connect.Request[v1.UpdateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error)
 	ShowTlbSite(context.Context, *connect.Request[v1.ShowTlbSiteRequest]) (*connect.Response[v1.TlbSiteDetail], error)
 	DeleteTlbSite(context.Context, *connect.Request[v1.DeleteTlbSiteRequest]) (*connect.Response[v1.DeleteTlbSiteResponse], error)
 	CreateTlbRoute(context.Context, *connect.Request[v1.CreateTlbRouteRequest]) (*connect.Response[v1.TlbRoute], error)
@@ -1014,6 +1031,12 @@ func NewPlatformServiceHandler(svc PlatformServiceHandler, opts ...connect.Handl
 		connect.WithSchema(platformServiceMethods.ByName("CreateTlbSite")),
 		connect.WithHandlerOptions(opts...),
 	)
+	platformServiceUpdateTlbSiteHandler := connect.NewUnaryHandler(
+		PlatformServiceUpdateTlbSiteProcedure,
+		svc.UpdateTlbSite,
+		connect.WithSchema(platformServiceMethods.ByName("UpdateTlbSite")),
+		connect.WithHandlerOptions(opts...),
+	)
 	platformServiceShowTlbSiteHandler := connect.NewUnaryHandler(
 		PlatformServiceShowTlbSiteProcedure,
 		svc.ShowTlbSite,
@@ -1126,6 +1149,8 @@ func NewPlatformServiceHandler(svc PlatformServiceHandler, opts ...connect.Handl
 			platformServiceListTlbSitesHandler.ServeHTTP(w, r)
 		case PlatformServiceCreateTlbSiteProcedure:
 			platformServiceCreateTlbSiteHandler.ServeHTTP(w, r)
+		case PlatformServiceUpdateTlbSiteProcedure:
+			platformServiceUpdateTlbSiteHandler.ServeHTTP(w, r)
 		case PlatformServiceShowTlbSiteProcedure:
 			platformServiceShowTlbSiteHandler.ServeHTTP(w, r)
 		case PlatformServiceDeleteTlbSiteProcedure:
@@ -1293,6 +1318,10 @@ func (UnimplementedPlatformServiceHandler) ListTlbSites(context.Context, *connec
 
 func (UnimplementedPlatformServiceHandler) CreateTlbSite(context.Context, *connect.Request[v1.CreateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.CreateTlbSite is not implemented"))
+}
+
+func (UnimplementedPlatformServiceHandler) UpdateTlbSite(context.Context, *connect.Request[v1.UpdateTlbSiteRequest]) (*connect.Response[v1.TlbSite], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("platform.v1.PlatformService.UpdateTlbSite is not implemented"))
 }
 
 func (UnimplementedPlatformServiceHandler) ShowTlbSite(context.Context, *connect.Request[v1.ShowTlbSiteRequest]) (*connect.Response[v1.TlbSiteDetail], error) {

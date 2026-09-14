@@ -231,8 +231,8 @@ export { errMsg };
 function dropSession() {
   localStorage.removeItem("token");
   localStorage.removeItem("user");
-  if (window.location.pathname !== "/login") {
-    window.location.assign("/login");
+  if (window.location.pathname !== "/minikitex/login") {
+    window.location.assign("/minikitex/login");
   }
 }
 
@@ -254,7 +254,7 @@ const auth: Interceptor = (next) => async (req) => {
 const client = createClient(
   PlatformService,
   createConnectTransport({
-    baseUrl: "",
+    baseUrl: "/minikitex",
     interceptors: [auth],
   }),
 );
@@ -548,7 +548,8 @@ export const api = {
       routes: d.routes.map(route),
       zone: d.zone,
     })),
-  createTlbSite: (name: string) => client.createTlbSite({ name }).then(site),
+  createTlbSite: (host: string, name?: string) => client.createTlbSite({ host, name: name || "" }).then(site),
+  updateTlbSite: (name: string, host: string) => client.updateTlbSite({ name, host }).then(site),
   deleteTlbSite: (name: string) => client.deleteTlbSite({ name }),
   createTlbRoute: (siteName: string, name: string, path: string, target: string) =>
     client.createTlbRoute({ site: siteName, name, path, target }).then(route),

@@ -98,6 +98,9 @@ export default function AppPage() {
           {app?.label === "python" ? (
             <div className="meta">Flask :80。发完后 TLB 把路径转到 {(compose[0] || name) + ":80"}。</div>
           ) : null}
+          {app?.label === "image" ? (
+            <div className="meta">按仓库 Dockerfile 打镜像，发完后替换 compose 服务 {compose.join(", ")}。</div>
+          ) : null}
         </div>
         <Button
           type="primary"

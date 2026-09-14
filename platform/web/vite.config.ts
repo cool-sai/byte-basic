@@ -3,12 +3,25 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
+  base: "/minikitex/",
   plugins: [react(), tailwindcss()],
   server: {
     host: true,
     port: 5173,
     allowedHosts: [".ls-byte-basic.com"],
     proxy: {
+      "/minikitex/api": {
+        target: "http://127.0.0.1:8081",
+        changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
+      },
+      "/minikitex/platform.v1.PlatformService": {
+        target: "http://127.0.0.1:8081",
+        changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
+      },
       "/api": {
         target: "http://127.0.0.1:8081",
         changeOrigin: true,
