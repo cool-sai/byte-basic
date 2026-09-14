@@ -373,14 +373,31 @@ func streamGit(w io.Writer, dir string, args ...string) error {
 	return cmd.Run()
 }
 
+func gitRemoteMatches(origin, want string) bool {
+	return normalizeGitURL(origin) == normalizeGitURL(want)
+}
+
+func originURL(work string) string {
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = work
+	b, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
 func (s *server) gitSync(name, url, branch string, w io.Writer) (string, error) {
 	work := filepath.Join(s.root, "scm-work", name)
-	if _, err := os.Stat(filepath.Join(work, ".git")); err == nil {
+	if _, err := os.Stat(filepath.Join(work, ".git")); err == nil && gitRemoteMatches(originURL(work), url) {
 		fmt.Fprint(w, "$ git fetch origin\n")
 		if err := streamGit(w, work, "fetch", "--progress", "origin"); err != nil {
 			return "", fmt.Errorf("git fetch: %w", err)
 		}
 	} else {
+		if err := os.RemoveAll(work); err != nil {
+			return "", err
+		}
 		if err := os.MkdirAll(filepath.Join(s.root, "scm-work"), 0o755); err != nil {
 			return "", err
 		}

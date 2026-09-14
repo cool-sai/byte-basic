@@ -149,6 +149,12 @@ func TestNormalizeGitURL(t *testing.T) {
 	if a != b || a != "github.com/cool-sai/byte-basic" {
 		t.Fatalf("%s %s", a, b)
 	}
+	if !gitRemoteMatches("https://github.com/cool-sai/byte-basic.git", "git@github.com:cool-sai/byte-basic.git") {
+		t.Fatal("same repo")
+	}
+	if gitRemoteMatches("https://github.com/cool-sai/byte-basic.git", "https://gitee.com/liang_race/lssl.git") {
+		t.Fatal("different host should re-clone")
+	}
 }
 
 func TestParseGitHook(t *testing.T) {
