@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,37 @@ func TestSeedGitURL(t *testing.T) {
 	t.Setenv("SCM_GIT_URL", "https://example.com/x.git")
 	if g := seedGitURL("."); g != "https://example.com/x.git" {
 		t.Fatalf("got %s", g)
+	}
+}
+
+func TestComposeServicePorts(t *testing.T) {
+	raw := `{
+		"services": {
+			"board": {
+				"environment": {"LISTEN": "0.0.0.0:8090"},
+				"expose": ["8090"]
+			},
+			"order": {
+				"environment": {"LISTEN": "0.0.0.0:8889", "METRICS": "0.0.0.0:9091"},
+				"expose": ["9091"],
+				"ports": [{"target": 8889}, {"target": 8080}]
+			},
+			"web": {"expose": ["80/tcp"]},
+			"tlb": {"expose": ["80"]}
+		}
+	}`
+	got := composeServicePorts(raw)
+	if strings.Join(got["board"], ",") != "8090" {
+		t.Fatalf("board %v", got["board"])
+	}
+	if strings.Join(got["order"], ",") != "8889,8080" {
+		t.Fatalf("order %v", got["order"])
+	}
+	if strings.Join(got["web"], ",") != "80" {
+		t.Fatalf("web %v", got["web"])
+	}
+	if _, ok := got["tlb"]; !ok {
+		t.Fatal("parser should still return tlb; skip is ListTlbUpstreams")
 	}
 }
 

@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -613,6 +615,117 @@ func tlbListenPort(name string) string {
 	}
 }
 
+func composeServicePorts(raw string) map[string][]string {
+	var cfg struct {
+		Services map[string]json.RawMessage `json:"services"`
+	}
+	if json.Unmarshal([]byte(raw), &cfg) != nil || len(cfg.Services) == 0 {
+		return nil
+	}
+	out := map[string][]string{}
+	for name, svc := range cfg.Services {
+		ps := serviceListenPorts(svc)
+		if len(ps) == 0 {
+			continue
+		}
+		out[name] = ps
+	}
+	return out
+}
+
+func serviceListenPorts(raw json.RawMessage) []string {
+	var svc map[string]any
+	if json.Unmarshal(raw, &svc) != nil {
+		return nil
+	}
+	env := envMap(svc["environment"])
+	skip := map[string]bool{}
+	if p := hostPort(env["METRICS"]); p != "" {
+		skip[p] = true
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		p = hostPort(p)
+		if p == "" || skip[p] || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	add(env["LISTEN"])
+	if arr, ok := svc["expose"].([]any); ok {
+		for _, x := range arr {
+			add(fmt.Sprint(x))
+		}
+	}
+	if arr, ok := svc["ports"].([]any); ok {
+		for _, x := range arr {
+			switch p := x.(type) {
+			case map[string]any:
+				add(jsonPort(p["target"]))
+			default:
+				add(fmt.Sprint(x))
+			}
+		}
+	}
+	return out
+}
+
+func envMap(v any) map[string]string {
+	m := map[string]string{}
+	switch e := v.(type) {
+	case map[string]any:
+		for k, val := range e {
+			if val != nil {
+				m[k] = fmt.Sprint(val)
+			}
+		}
+	case []any:
+		for _, x := range e {
+			s, _ := x.(string)
+			k, val, ok := strings.Cut(s, "=")
+			if ok {
+				m[k] = val
+			}
+		}
+	}
+	return m
+}
+
+func jsonPort(v any) string {
+	switch x := v.(type) {
+	case float64:
+		return strconv.Itoa(int(x))
+	case json.Number:
+		return x.String()
+	case string:
+		return x
+	default:
+		if v == nil {
+			return ""
+		}
+		return fmt.Sprint(v)
+	}
+}
+
+func hostPort(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, "/tcp")
+	s = strings.TrimSuffix(s, "/udp")
+	if i := strings.LastIndex(s, ":"); i >= 0 {
+		s = s[i+1:]
+	}
+	if s == "" {
+		return ""
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 || n > 65535 {
+		return ""
+	}
+	return strconv.Itoa(n)
+}
+
 func (s *server) ListTlbUpstreams(context.Context, *connect.Request[v1.ListTlbUpstreamsRequest]) (*connect.Response[v1.ListTlbUpstreamsResponse], error) {
 	names := map[string]bool{}
 	add := func(n string) {
@@ -627,7 +740,13 @@ func (s *server) ListTlbUpstreams(context.Context, *connect.Request[v1.ListTlbUp
 	add("home")
 	add("home-web")
 	add("order")
-	if out, err := s.compose("config", "--services"); err == nil {
+	ports := map[string][]string{}
+	if out, err := s.composeCmd("config", "--format", "json").Output(); err == nil {
+		ports = composeServicePorts(string(out))
+		for n := range ports {
+			add(n)
+		}
+	} else if out, err := s.compose("config", "--services"); err == nil {
 		for _, line := range strings.Split(out, "\n") {
 			add(line)
 		}
@@ -651,7 +770,13 @@ func (s *server) ListTlbUpstreams(context.Context, *connect.Request[v1.ListTlbUp
 	sort.Strings(list)
 	up := make([]*v1.TlbUpstream, 0, len(list))
 	for _, n := range list {
-		up = append(up, &v1.TlbUpstream{Name: n, Target: n + ":" + tlbListenPort(n)})
+		ps := ports[n]
+		if len(ps) == 0 {
+			ps = []string{tlbListenPort(n)}
+		}
+		for _, p := range ps {
+			up = append(up, &v1.TlbUpstream{Name: n, Target: n + ":" + p})
+		}
 	}
 	return connect.NewResponse(&v1.ListTlbUpstreamsResponse{Upstreams: up}), nil
 }
