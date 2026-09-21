@@ -50,8 +50,16 @@ type kindNameArgs struct {
 	Kind string `json:"kind" jsonschema:"种类名称"`
 }
 
+const mcpInstructions = `刷题看板。浏览器只读 https://lssl.work/board/ ，写数据只用这些工具。
+
+三层：kind（桶）→ item（桶里一条）→ 可选的 kind html（每种一段 Go template，用来渲染该种类 item.content）。content 可以是 JSON 文本，模板根对象就是这份 JSON，例如 {{.title}}、{{.url}}。没绑 html 时页面直接显示原文。
+
+顺序：create_kind（同名幂等）→ 需要定制展示再 create_kind_html / get_kind_html / update_kind_html → add_item / list_items / update_item / delete_item。list_items 按种类分页、日期新到旧。算法种类约定 content 为 {"title":"...","url":"https://..."}，html 为 <a href="{{.url}}">{{.title}}</a>。`
+
 func newMCPServer(board Board) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "board", Version: "v0.1.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "board", Version: "v0.1.0"}, &mcp.ServerOptions{
+		Instructions: mcpInstructions,
+	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_kind",
 		Description: "创建种类（算法、系统设计、待办、每日新闻等）；同名返回已有记录",

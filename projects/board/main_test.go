@@ -71,6 +71,36 @@ func TestMCPUnauthorized(t *testing.T) {
 	}
 }
 
+func TestMCPInstructions(t *testing.T) {
+	ts := httptest.NewServer(testMux(t, "secret"))
+	t.Cleanup(ts.Close)
+	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer secret")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	if res.StatusCode != 200 {
+		t.Fatalf("initialize %d %s", res.StatusCode, b)
+	}
+	var msg struct {
+		Result struct {
+			Instructions string `json:"instructions"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(b, &msg); err != nil {
+		t.Fatal(err)
+	}
+	if msg.Result.Instructions != mcpInstructions {
+		t.Fatalf("instructions %q", msg.Result.Instructions)
+	}
+}
+
 func TestMCPUpdateThenRead(t *testing.T) {
 	ts := httptest.NewServer(testMux(t, "secret"))
 	t.Cleanup(ts.Close)
