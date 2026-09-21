@@ -168,7 +168,7 @@ services:
     environment:
       LISTEN: "0.0.0.0:8081"
       MYSQL: "root:minikitex@tcp(mysql:3306)/minikitex?parseTime=true&charset=utf8mb4"
-      HOST_ROOT: ${PWD}
+      HOST_ROOT: ${HOST_ROOT:-${PWD}}
       TZ: Asia/Shanghai
       TLB_TLS_NAME: ${TLB_TLS_NAME:-}
       SCM_GIT_URL: ${SCM_GIT_URL:-https://github.com/cool-sai/byte-basic.git}

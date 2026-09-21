@@ -1103,16 +1103,49 @@ func (s *server) composeUp(w io.Writer, services []string) error {
 	return s.composeTo(w, args...)
 }
 
+func mountSource(dest string) string {
+	b, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return ""
+	}
+	return mountSourceFrom(string(b), dest)
+}
+
+func mountSourceFrom(mountinfo, dest string) string {
+	for _, line := range strings.Split(mountinfo, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+		if fields[4] != dest {
+			continue
+		}
+		src := fields[3]
+		if src == "" || src == dest {
+			continue
+		}
+		return src
+	}
+	return ""
+}
+
 func (s *server) hostRoot() string {
-	if h := strings.TrimSpace(os.Getenv("HOST_ROOT")); h != "" {
+	h := strings.TrimSpace(os.Getenv("HOST_ROOT"))
+	if h != "" && h != "/work" {
 		return h
+	}
+	if src := mountSource("/work"); src != "" {
+		return src
 	}
 	return s.root
 }
 
 func (s *server) composeSidecar(w io.Writer, args ...string) error {
 	root := s.hostRoot()
-	fmt.Fprint(w, "$ docker run --rm compose-sidecar\n")
+	if root == "" || root == "/work" {
+		return fmt.Errorf("HOST_ROOT 不是宿主机路径: %q", root)
+	}
+	fmt.Fprintf(w, "$ docker run --rm compose-sidecar HOST_ROOT=%s\n", root)
 	composeArgs := append([]string{"compose"}, s.composeFileArgs()...)
 	composeArgs = append(composeArgs, args...)
 	cmd := exec.Command("docker", append([]string{
@@ -1120,6 +1153,8 @@ func (s *server) composeSidecar(w io.Writer, args ...string) error {
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
 		"-v", root + ":" + root,
 		"-w", root,
+		"-e", "HOST_ROOT=" + root,
+		"-e", "PWD=" + root,
 		"--entrypoint", "docker",
 		"minikitex-platform:local",
 	}, composeArgs...)...)

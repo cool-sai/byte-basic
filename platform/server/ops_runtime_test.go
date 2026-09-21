@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+func TestMountSourceFrom(t *testing.T) {
+	info := "2073 1650 253:1 /opt/byte-basic /work rw,relatime master:1 - ext4 /dev/vda1 rw\n"
+	if got := mountSourceFrom(info, "/work"); got != "/opt/byte-basic" {
+		t.Fatalf("got %q", got)
+	}
+	if got := mountSourceFrom("1 2 0:0 /work /work rw - ext4 /dev/sda rw\n", "/work"); got != "" {
+		t.Fatalf("same path %q", got)
+	}
+}
+
 func TestComposeFromArtifactAndPin(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "projects", "board")
