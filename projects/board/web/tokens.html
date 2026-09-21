@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Token 管理</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: #0f1419;
+      color: #e7ecf3;
+    }
+    main { width: min(820px, 92vw); margin: 0 auto; padding: 36px 0 56px; }
+    h1 { margin: 0 0 6px; font-size: 1.4rem; font-weight: 650; }
+    .meta { color: #8b98a5; font-size: 0.95rem; margin: 0 0 22px; }
+    a { color: #8b98a5; }
+    .card {
+      background: #1a2330;
+      border: 1px solid #2b3848;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    label { display: block; color: #8b98a5; font-size: 0.9rem; margin-bottom: 8px; }
+    input {
+      width: 100%;
+      background: #0f1419;
+      color: #e7ecf3;
+      border: 1px solid #2b3848;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 1rem;
+    }
+    .row { display: flex; gap: 10px; align-items: flex-end; }
+    .row > div { flex: 1; }
+    button {
+      background: #3d8bfd;
+      color: #fff;
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    button.ghost { background: #2b3848; }
+    button.danger { background: #8b3a3a; }
+    .err { color: #f7b267; min-height: 1.3em; margin: 10px 0 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #2b3848; font-size: 0.92rem; }
+    th { color: #8b98a5; font-weight: 500; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .secret {
+      background: #0f1419;
+      border-radius: 10px;
+      padding: 12px;
+      word-break: break-all;
+      margin: 10px 0;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Token 管理</h1>
+    <p class="meta"><a href="/board/">← 看板</a>　<a href="/board/kinds/">种类列表</a>　<a href="/board/tools/">MCP 工具</a>　签发时填名字（如 grok bot），列表用来对上是谁在用。</p>
+
+    <div id="gate" class="card">
+      <label for="admin">管理员 token（环境变量 BOARD_TOKEN）</label>
+      <div class="row">
+        <div><input id="admin" type="password" autocomplete="current-password" /></div>
+        <button type="button" id="unlock">进入</button>
+      </div>
+      <p id="gate-err" class="err"></p>
+    </div>
+
+    <div id="app" class="hidden">
+      <div class="card">
+        <label for="name">名称</label>
+        <div class="row">
+          <div><input id="name" placeholder="例如 grok bot / 算法 agent" maxlength="64" /></div>
+          <button type="button" id="create">生成</button>
+        </div>
+        <p id="form-err" class="err"></p>
+        <div id="once" class="hidden">
+          <p class="meta">只显示这一次，请立刻复制到对应客户端：</p>
+          <div class="secret"><code id="once-token"></code></div>
+          <button type="button" class="ghost" id="copy">复制</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead>
+            <tr><th>名称</th><th>前缀</th><th>创建</th><th>最近使用</th><th></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <p id="empty" class="meta hidden">还没有签发过</p>
+      </div>
+    </div>
+  </main>
+  <script>
+    const KEY = "board_admin_token";
+    const gate = document.getElementById("gate");
+    const app = document.getElementById("app");
+    const admin = document.getElementById("admin");
+    const gateErr = document.getElementById("gate-err");
+    const formErr = document.getElementById("form-err");
+    const once = document.getElementById("once");
+    const onceToken = document.getElementById("once-token");
+    const rows = document.getElementById("rows");
+    const empty = document.getElementById("empty");
+
+    const headers = () => ({
+      Authorization: "Bearer " + sessionStorage.getItem(KEY),
+      "Content-Type": "application/json",
+    });
+
+    const api = (path, opt) => fetch(path, { cache: "no-store", ...opt, headers: { ...headers(), ...(opt && opt.headers) } });
+
+    const showApp = () => { gate.classList.add("hidden"); app.classList.remove("hidden"); };
+    const showGate = (msg) => {
+      sessionStorage.removeItem(KEY);
+      app.classList.add("hidden");
+      gate.classList.remove("hidden");
+      gateErr.textContent = msg || "";
+    };
+
+    async function load() {
+      const r = await api("/board/api/tokens");
+      if (r.status === 401) { showGate("token 不对"); return; }
+      if (!r.ok) { formErr.textContent = "拉取失败"; return; }
+      const d = await r.json();
+      const list = d.tokens || [];
+      rows.innerHTML = "";
+      empty.classList.toggle("hidden", list.length > 0);
+      list.forEach((t) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${esc(t.name)}</td><td><code>${esc(t.prefix)}…</code></td><td>${esc(t.created_at || "")}</td><td>${esc(t.last_used_at || "尚未使用")}</td><td></td>`;
+        const btn = document.createElement("button");
+        btn.className = "danger";
+        btn.textContent = "删除";
+        btn.onclick = async () => {
+          if (!confirm("删除「" + t.name + "」？对应客户端立刻失效。")) return;
+          const dr = await api("/board/api/tokens/" + t.id, { method: "DELETE" });
+          if (dr.status === 401) { showGate("token 不对"); return; }
+          load();
+        };
+        tr.lastElementChild.appendChild(btn);
+        rows.appendChild(tr);
+      });
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    document.getElementById("unlock").onclick = async () => {
+      sessionStorage.setItem(KEY, admin.value.trim());
+      gateErr.textContent = "";
+      showApp();
+      await load();
+    };
+
+    document.getElementById("create").onclick = async () => {
+      formErr.textContent = "";
+      once.classList.add("hidden");
+      const r = await api("/board/api/tokens", {
+        method: "POST",
+        body: JSON.stringify({ name: document.getElementById("name").value }),
+      });
+      if (r.status === 401) { showGate("token 不对"); return; }
+      const d = await r.json();
+      if (!r.ok) { formErr.textContent = d.error || "生成失败"; return; }
+      onceToken.textContent = d.token;
+      once.classList.remove("hidden");
+      document.getElementById("name").value = "";
+      await load();
+    };
+
+    document.getElementById("copy").onclick = async () => {
+      try { await navigator.clipboard.writeText(onceToken.textContent); } catch (_) {}
+    };
+
+    if (sessionStorage.getItem(KEY)) {
+      showApp();
+      load();
+    }
+  </script>
+</body>
+</html>

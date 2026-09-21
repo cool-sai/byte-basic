@@ -174,6 +174,7 @@ func seedTlb(db *sql.DB) error {
 		)
 		migrateTlbMinikite(db)
 		seedTlbHome(db, consoleID)
+		seedTlbBoard(db, consoleID)
 		return nil
 	}
 	for _, r := range []tlbRoute{
@@ -191,6 +192,7 @@ func seedTlb(db *sql.DB) error {
 	}
 	migrateTlbMinikite(db)
 	seedTlbHome(db, consoleID)
+	seedTlbBoard(db, consoleID)
 	return nil
 }
 
@@ -215,6 +217,13 @@ func seedTlbHome(db *sql.DB, consoleID int64) {
 		consoleID, "home-web", "/", "home-web:80",
 	)
 	_, _ = db.Exec(`UPDATE tlb_route SET target='home:80' WHERE name IN ('home-api','home-connect') AND target='home:8082'`)
+}
+
+func seedTlbBoard(db *sql.DB, consoleID int64) {
+	_, _ = db.Exec(
+		`INSERT IGNORE INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`,
+		consoleID, "board", "/board", "board:8090",
+	)
 }
 
 func (s *server) getTlbSite(name string) (tlbSite, error) {

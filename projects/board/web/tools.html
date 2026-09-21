@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MCP 工具</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: #0f1419;
+      color: #e7ecf3;
+    }
+    main { width: min(820px, 92vw); margin: 0 auto; padding: 36px 0 56px; }
+    h1 { margin: 0 0 6px; font-size: 1.4rem; font-weight: 650; }
+    .meta { color: #8b98a5; font-size: 0.95rem; margin: 0 0 22px; }
+    a { color: #8b98a5; }
+    .card {
+      background: #1a2330;
+      border: 1px solid #2b3848;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.05rem; }
+    .desc { color: #8b98a5; margin: 8px 0 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #2b3848; font-size: 0.9rem; vertical-align: top; }
+    th { color: #8b98a5; font-weight: 500; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .req { color: #f7b267; font-size: 0.8rem; }
+    .opt { color: #6b7785; font-size: 0.8rem; }
+    .err { color: #f7b267; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MCP 工具</h1>
+    <p class="meta"><a href="/board/">← 看板</a>　<a href="/board/kinds/">种类列表</a>　<a href="/board/tokens/">token 管理</a>　这些就是 agent 能调的工具。</p>
+    <div id="list"></div>
+  </main>
+  <script>
+    const list = document.getElementById("list");
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    fetch("/board/api/tools", { cache: "no-store" })
+      .then((r) => { if (!r.ok) throw new Error("fail"); return r.json(); })
+      .then((d) => {
+        const tools = d.tools || [];
+        if (!tools.length) { list.innerHTML = '<p class="err">暂无工具</p>'; return; }
+        list.innerHTML = tools.map((t) => {
+          const rows = (t.fields || []).map((f) =>
+            `<tr><td><code>${esc(f.name)}</code></td><td>${esc(f.type)}</td><td class="${f.required ? "req" : "opt"}">${f.required ? "必填" : "可选"}</td><td>${esc(f.description || "")}</td></tr>`
+          ).join("");
+          return `<div class="card"><div class="name">${esc(t.name)}</div><p class="desc">${esc(t.description || "")}</p>
+            <table><thead><tr><th>参数</th><th>类型</th><th></th><th>说明</th></tr></thead><tbody>${rows || '<tr><td colspan="4">无参数</td></tr>'}</tbody></table></div>`;
+        }).join("");
+      })
+      .catch(() => { list.innerHTML = '<p class="err">拉取失败</p>'; });
+  </script>
+</body>
+</html>
