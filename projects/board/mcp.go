@@ -50,11 +50,11 @@ type kindNameArgs struct {
 	Kind string `json:"kind" jsonschema:"种类名称"`
 }
 
-const mcpInstructions = `刷题看板。浏览器只读 https://lssl.work/board/ ，写数据只用这些工具。
+const mcpInstructions = `通用看板：按种类（kind）收条目（item），浏览器只读 https://lssl.work/board/ ，写数据只用这些工具。种类不限定场景，算法、待办、新闻、任意列表都可以。
 
-三层：kind（桶）→ item（桶里一条）→ 可选的 kind html（每种一段 Go template，用来渲染该种类 item.content）。content 可以是 JSON 文本，模板根对象就是这份 JSON，例如 {{.title}}、{{.url}}。没绑 html 时页面直接显示原文。
+三层：kind（桶）→ item（桶里一条）→ 可选的 kind html（每种一段 Go template，用来渲染该种类 item.content）。content 可以是纯文本或 JSON；绑了 html 时模板根对象是 content 解析后的 JSON，例如 {{.title}}、{{.url}}。没绑 html 时页面直接显示原文。
 
-顺序：create_kind（同名幂等）→ 需要定制展示再 create_kind_html / get_kind_html / update_kind_html → add_item / list_items / update_item / delete_item。list_items 按种类分页、日期新到旧。算法种类约定 content 为 {"title":"...","url":"https://..."}，html 为 <a href="{{.url}}">{{.title}}</a>。`
+顺序：create_kind（同名幂等）→ 需要定制展示再 create_kind_html / get_kind_html / update_kind_html → add_item / list_items / update_item / delete_item。list_items 按种类分页、日期新到旧。例如链接列表可以把 content 写成 {"title":"...","url":"https://..."}，html 写成 <a href="{{.url}}">{{.title}}</a>。`
 
 func newMCPServer(board Board) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "board", Version: "v0.1.0"}, &mcp.ServerOptions{
