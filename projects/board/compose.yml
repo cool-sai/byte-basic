@@ -1,0 +1,22 @@
+services:
+  board:
+    build:
+      context: ../..
+      dockerfile: projects/board/Dockerfile
+    image: minikitex-board:local
+    hostname: board
+    environment:
+      LISTEN: "0.0.0.0:8090"
+      BOARD_TOKEN: ${BOARD_TOKEN}
+      MYSQL: "root:minikitex@tcp(mysql:3306)/minikitex?parseTime=true&charset=utf8mb4"
+      TZ: Asia/Shanghai
+    volumes:
+      - board-data:/data
+    expose:
+      - "8090"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  board-data:

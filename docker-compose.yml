@@ -1,5 +1,8 @@
 name: golang
 
+include:
+  - path: projects/board/compose.yml
+
 services:
   consul:
     build:
@@ -196,25 +199,6 @@ services:
     expose:
       - "80"
 
-  board:
-    build:
-      context: .
-      dockerfile: projects/board/Dockerfile
-    image: minikitex-board:local
-    hostname: board
-    environment:
-      LISTEN: "0.0.0.0:8090"
-      BOARD_TOKEN: ${BOARD_TOKEN}
-      MYSQL: "root:minikitex@tcp(mysql:3306)/minikitex?parseTime=true&charset=utf8mb4"
-      TZ: Asia/Shanghai
-    volumes:
-      - board-data:/data
-    expose:
-      - "8090"
-    depends_on:
-      mysql:
-        condition: service_healthy
-
   # TLB：对外 HTTP 入口，按路径转到前端 / 平台 API / 各服务 AGW。
   tlb:
     build:
@@ -234,7 +218,6 @@ services:
     depends_on:
       - platform
       - platform-web
-      - board
 
   mysql:
     image: mysql:8.0.40
@@ -287,4 +270,3 @@ volumes:
   tlb-conf:
   tlb-acme:
   letsencrypt:
-  board-data:

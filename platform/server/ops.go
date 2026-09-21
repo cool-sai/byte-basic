@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"gopkg.in/yaml.v3"
 
 	v1 "minikitex/gen/platform/v1"
 )
@@ -1007,7 +1008,7 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 			return
 		}
 	}
-	if err := s.syncRuntimeCompose(app, label); err != nil {
+	if err := s.syncRuntimeCompose(live, app, label, src); err != nil {
 		finish("fail", err)
 		return
 	}
@@ -1365,7 +1366,46 @@ func (s *server) dropExtraRuntime(compose []string) {
 	}
 }
 
-func (s *server) syncRuntimeCompose(app deployApp, label string) error {
+func composeFromArtifact(src, svc string) ([]byte, error) {
+	if svc == "" || !jobName.MatchString(svc) {
+		return nil, fmt.Errorf("bad service")
+	}
+	name := "projects/" + svc + "/compose.yml"
+	cmd := exec.Command("tar", "-xOf", src, name)
+	b, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(string(b)) == "" {
+		return nil, fmt.Errorf("empty %s", name)
+	}
+	return b, nil
+}
+
+func pinRuntimeImage(raw []byte, svc, image string) ([]byte, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	svcs, ok := doc["services"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("compose 没有 services")
+	}
+	one, ok := svcs[svc].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("compose 没有服务 %s", svc)
+	}
+	delete(one, "build")
+	one["image"] = image
+	one["pull_policy"] = "never"
+	out := map[string]any{"services": map[string]any{svc: one}}
+	if v, ok := doc["volumes"]; ok {
+		out["volumes"] = v
+	}
+	return yaml.Marshal(out)
+}
+
+func (s *server) syncRuntimeCompose(lg io.Writer, app deployApp, label, src string) error {
 	if err := splitCombinedRuntime(s.root); err != nil {
 		return err
 	}
@@ -1387,7 +1427,16 @@ func (s *server) syncRuntimeCompose(app deployApp, label string) error {
 	}
 	image := "minikitex-" + app.Name + ":local"
 	for _, c := range extraCompose(app.Compose, main) {
-		if err := os.WriteFile(filepath.Join(dir, c+".yml"), []byte(runtimeServiceYAML(c, image, label)), 0o644); err != nil {
+		body := runtimeServiceYAML(c, image, label)
+		if raw, err := composeFromArtifact(src, c); err == nil {
+			if pinned, err := pinRuntimeImage(raw, c, image); err == nil {
+				body = string(pinned)
+				if lg != nil {
+					fmt.Fprintf(lg, "runtime overlay projects/%s/compose.yml\n", c)
+				}
+			}
+		}
+		if err := os.WriteFile(filepath.Join(dir, c+".yml"), []byte(body), 0o644); err != nil {
 			return err
 		}
 	}
