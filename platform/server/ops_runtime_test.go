@@ -8,6 +8,25 @@ import (
 	"testing"
 )
 
+func TestDecodeComposePSIgnoresWarn(t *testing.T) {
+	raw := []byte(`time="2026-09-21T19:00:00Z" level=warning msg="Found orphan containers"
+{"ID":"abc","Name":"golang-board-1","Service":"board","State":"running","Status":"Up 2 seconds"}
+{"ID":"def","Service":"platform","State":"running"}
+`)
+	got, err := decodeComposePS(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Service != "board" || got[1].Service != "platform" {
+		t.Fatalf("%+v", got)
+	}
+	arr := []byte(`[{"Service":"tlb","State":"running"}]`)
+	got, err = decodeComposePS(arr)
+	if err != nil || len(got) != 1 || got[0].Service != "tlb" {
+		t.Fatalf("%v %+v", err, got)
+	}
+}
+
 func TestMountSourceFrom(t *testing.T) {
 	info := "2073 1650 253:1 /opt/byte-basic /work rw,relatime master:1 - ext4 /dev/vda1 rw\n"
 	if got := mountSourceFrom(info, "/work"); got != "/opt/byte-basic" {

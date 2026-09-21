@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1021,38 +1022,88 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 }
 
 func (s *server) Runtime(context.Context, *connect.Request[v1.RuntimeRequest]) (*connect.Response[v1.RuntimeResponse], error) {
-	out, err := s.compose("ps", "--format", "json")
+	cmd := s.composeCmd("ps", "--format", "json")
+	b, err := cmd.Output()
 	if err != nil {
-		return nil, internal(fmt.Errorf("%w\n%s", err, out))
+		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+			return nil, internal(fmt.Errorf("%w\n%s", err, ee.Stderr))
+		}
+		return nil, internal(err)
 	}
-	dec := json.NewDecoder(strings.NewReader(out))
-	var items []*v1.Container
+	items, err := decodeComposePS(b)
+	if err != nil {
+		return nil, internal(err)
+	}
+	return connect.NewResponse(&v1.RuntimeResponse{Containers: items}), nil
+}
+
+func jsonPayload(raw []byte) []byte {
+	i, j := bytes.IndexByte(raw, '{'), bytes.IndexByte(raw, '[')
+	switch {
+	case i < 0 && j < 0:
+		return bytes.TrimSpace(raw)
+	case i < 0:
+		return raw[j:]
+	case j < 0:
+		return raw[i:]
+	case i < j:
+		return raw[i:]
+	default:
+		return raw[j:]
+	}
+}
+
+func psField(one map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := one[k]; ok && v != nil {
+			return fmt.Sprint(v)
+		}
+	}
+	return ""
+}
+
+func containerFromPS(one map[string]any) *v1.Container {
+	return &v1.Container{
+		Id:      psField(one, "ID", "Id"),
+		Name:    psField(one, "Name"),
+		Service: psField(one, "Service"),
+		Image:   psField(one, "Image"),
+		Status:  psField(one, "Status"),
+		State:   psField(one, "State"),
+	}
+}
+
+func decodeComposePS(raw []byte) ([]*v1.Container, error) {
+	raw = jsonPayload(raw)
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, nil
+	}
+	if raw[0] == '[' {
+		var arr []map[string]any
+		if err := json.Unmarshal(raw, &arr); err != nil {
+			return nil, err
+		}
+		out := make([]*v1.Container, 0, len(arr))
+		for _, one := range arr {
+			out = append(out, containerFromPS(one))
+		}
+		return out, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var out []*v1.Container
 	for {
 		var one map[string]any
 		if err := dec.Decode(&one); err != nil {
 			if err == io.EOF {
-				break
+				return out, nil
 			}
-			return nil, internal(err)
-		}
-		str := func(keys ...string) string {
-			for _, k := range keys {
-				if v, ok := one[k]; ok && v != nil {
-					return fmt.Sprint(v)
-				}
+			if len(out) > 0 {
+				return out, nil
 			}
-			return ""
+			return nil, err
 		}
-		items = append(items, &v1.Container{
-			Id:      str("ID", "Id"),
-			Name:    str("Name"),
-			Service: str("Service"),
-			Image:   str("Image"),
-			Status:  str("Status"),
-			State:   str("State"),
-		})
+		out = append(out, containerFromPS(one))
 	}
-	return connect.NewResponse(&v1.RuntimeResponse{Containers: items}), nil
 }
 
 func (s *server) composeFileArgs() []string {
