@@ -562,7 +562,7 @@ http {
 		for _, r := range routes {
 			fmt.Fprintf(&b, `
         location %s {
-            set $tlb_upstream %s;
+            set $tlb_upstream %s;%s
             proxy_pass http://$tlb_upstream;
             proxy_http_version 1.1;
             proxy_set_header Host $http_host;
@@ -571,12 +571,23 @@ http {
             proxy_buffering off;
             proxy_read_timeout 3600s;
         }
-`, r.Path, r.Target)
+`, r.Path, r.Target, tlbStrip(r.Path))
 		}
 		b.WriteString("    }\n")
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// tlbStrip 去掉多段路径的第一段。proxy_pass 用了变量，nginx 不会按 location 自动截掉。
+// /minikitex/platform.v1.PlatformService/Login 转到上游是 /platform.v1.PlatformService/Login。
+// 只有一段的路径原样转发，页面文件仍按 /minikitex/index.html 找。
+func tlbStrip(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 || parts[0] == "" {
+		return ""
+	}
+	return "\n            rewrite ^/[^/]+(/.*)$ $1 break;"
 }
 
 func tlbTLSDir() string {

@@ -5,6 +5,44 @@ import (
 	"testing"
 )
 
+func TestRenderTlbStripsSitePrefix(t *testing.T) {
+	conf := renderTlbNginx([]tlbSiteFull{{
+		tlbSite: tlbSite{Host: "console.example.com"},
+		routes: []tlbRoute{
+			{Path: "/minikitex/platform.v1.PlatformService", Target: "platform:8081"},
+			{Path: "/minikitex/api", Target: "platform:8081"},
+			{Path: "/minikitex", Target: "platform-web:80"},
+			{Path: "/api", Target: "home:80"},
+			{Path: "/home.v1.HomeService", Target: "home:80"},
+			{Path: "/", Target: "home-web:80"},
+		},
+	}})
+	for _, path := range []string{"/minikitex/platform.v1.PlatformService", "/minikitex/api"} {
+		block := "location " + path + " {"
+		i := strings.Index(conf, block)
+		if i < 0 {
+			t.Fatalf("missing %s", path)
+		}
+		rest := conf[i:]
+		j := strings.Index(rest, "proxy_pass")
+		if j < 0 || !strings.Contains(rest[:j], "rewrite ^/[^/]+(/.*)$ $1 break;") {
+			t.Fatalf("%s did not strip", path)
+		}
+	}
+	for _, path := range []string{"/minikitex", "/api", "/home.v1.HomeService", "/"} {
+		block := "location " + path + " {"
+		i := strings.Index(conf, block)
+		if i < 0 {
+			t.Fatalf("missing %s", path)
+		}
+		rest := conf[i:]
+		j := strings.Index(rest, "proxy_pass")
+		if j < 0 || strings.Contains(rest[:j], "rewrite") {
+			t.Fatalf("%s should forward the original path", path)
+		}
+	}
+}
+
 func TestTlbSiteFromInput(t *testing.T) {
 	t.Setenv("TLB_ZONE", "")
 	t.Setenv("TLB_TLS_NAME", "")
