@@ -1323,7 +1323,8 @@ WORKDIR /app
 COPY app /app
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 EXPOSE 80
-CMD ["sh", "-c", "gunicorn -b ${LISTEN:-0.0.0.0:80} app:app"]
+RUN test -f /app/start.sh
+CMD ["sh", "/app/start.sh"]
 `
 
 func (s *server) buildPythonImage(lg io.Writer, src, imageVer, imageLocal string) error {
