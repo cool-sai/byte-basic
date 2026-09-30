@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -17,7 +18,13 @@ func TestRenderTlbStripsSitePrefix(t *testing.T) {
 			{Path: "/", Target: "home-web:80"},
 		},
 	}})
-	for _, path := range []string{"/minikitex/platform.v1.PlatformService", "/minikitex/api"} {
+	for _, path := range []string{
+		"/minikitex/platform.v1.PlatformService",
+		"/minikitex/api",
+		"/minikitex",
+		"/api",
+		"/home.v1.HomeService",
+	} {
 		block := "location " + path + " {"
 		i := strings.Index(conf, block)
 		if i < 0 {
@@ -25,21 +32,20 @@ func TestRenderTlbStripsSitePrefix(t *testing.T) {
 		}
 		rest := conf[i:]
 		j := strings.Index(rest, "proxy_pass")
-		if j < 0 || !strings.Contains(rest[:j], "rewrite ^/[^/]+(/.*)$ $1 break;") {
-			t.Fatalf("%s did not strip", path)
+		want := "rewrite ^" + regexp.QuoteMeta(path) + "/?(.*)$ /$1 break;"
+		if j < 0 || !strings.Contains(rest[:j], want) {
+			t.Fatalf("%s did not strip the configured prefix", path)
 		}
 	}
-	for _, path := range []string{"/minikitex", "/api", "/home.v1.HomeService", "/"} {
-		block := "location " + path + " {"
-		i := strings.Index(conf, block)
-		if i < 0 {
-			t.Fatalf("missing %s", path)
-		}
-		rest := conf[i:]
-		j := strings.Index(rest, "proxy_pass")
-		if j < 0 || strings.Contains(rest[:j], "rewrite") {
-			t.Fatalf("%s should forward the original path", path)
-		}
+	block := "location / {"
+	i := strings.Index(conf, block)
+	if i < 0 {
+		t.Fatal("missing /")
+	}
+	rest := conf[i:]
+	j := strings.Index(rest, "proxy_pass")
+	if j < 0 || strings.Contains(rest[:j], "rewrite") {
+		t.Fatal("/ should forward the original path")
 	}
 }
 

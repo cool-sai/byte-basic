@@ -579,15 +579,14 @@ http {
 	return b.String()
 }
 
-// tlbStrip 去掉多段路径的第一段。proxy_pass 用了变量，nginx 不会按 location 自动截掉。
-// /minikitex/platform.v1.PlatformService/Login 转到上游是 /platform.v1.PlatformService/Login。
-// 只有一段的路径原样转发，页面文件仍按 /minikitex/index.html 找。
+// tlbStrip 去掉这条路由配置的整段前缀。proxy_pass 用了变量，nginx 不会按 location 自动截。
+// 配 /a/b/c，请求 /a/b/c/d，上游收到 /d。根路径 / 原样转发。
 func tlbStrip(path string) string {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 2 || parts[0] == "" {
+	path = strings.TrimRight(path, "/")
+	if path == "" || path == "/" {
 		return ""
 	}
-	return "\n            rewrite ^/[^/]+(/.*)$ $1 break;"
+	return "\n            rewrite ^" + regexp.QuoteMeta(path) + "/?(.*)$ /$1 break;"
 }
 
 func tlbTLSDir() string {
