@@ -254,7 +254,7 @@ const auth: Interceptor = (next) => async (req) => {
 const client = createClient(
   PlatformService,
   createConnectTransport({
-    baseUrl: "/minikitex",
+    baseUrl: "/minikitex/api",
     interceptors: [auth],
   }),
 );
