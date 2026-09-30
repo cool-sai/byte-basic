@@ -1261,16 +1261,6 @@ http {
     server {
         listen 80;
         root /usr/share/nginx/html;
-        location /minikitex/assets/ {
-            add_header Cache-Control "public, max-age=31536000, immutable";
-        }
-        location = /minikitex {
-            return 302 /minikitex/;
-        }
-        location /minikitex/ {
-            add_header Cache-Control "no-cache";
-            try_files $uri $uri/ /minikitex/index.html;
-        }
         location /assets/ {
             add_header Cache-Control "public, max-age=31536000, immutable";
         }
