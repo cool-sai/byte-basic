@@ -34,6 +34,7 @@ export default function JobPage() {
   );
   const job = data?.job;
   const builds = data?.builds || [];
+  const building = builds.some((b) => b.status === "running");
 
   const { data: br, loading: brLoading, error: brErr } = useRequest(() => api.branches(name), {
     ready: open,
@@ -90,7 +91,7 @@ export default function JobPage() {
           >
             删除
           </Button>
-          <Button type="primary" onClick={() => setOpen(true)}>
+          <Button type="primary" disabled={building} onClick={() => setOpen(true)}>
             编译
           </Button>
         </div>
@@ -144,7 +145,7 @@ export default function JobPage() {
         onCancel={() => setOpen(false)}
         onOk={() => void start(branch)}
         confirmLoading={starting}
-        okButtonProps={{ disabled: !branch }}
+        okButtonProps={{ disabled: !branch || building }}
       >
         {brErr ? <Typography.Text type="error">{errMsg(brErr)}</Typography.Text> : null}
         <Select

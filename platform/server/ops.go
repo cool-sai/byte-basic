@@ -489,6 +489,28 @@ func (s *server) loadBuild(id int64) (*v1.Build, error) {
 	return b, nil
 }
 
+func (s *server) idleBuild(service string) error {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM scm_build WHERE service=? AND status='running'`, service).Scan(&n); err != nil {
+		return internal(err)
+	}
+	if n > 0 {
+		return invalid(fmt.Errorf("build already running"))
+	}
+	return nil
+}
+
+func (s *server) idleDeploy(service string) error {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM deploy_record WHERE service=? AND status='running'`, service).Scan(&n); err != nil {
+		return internal(err)
+	}
+	if n > 0 {
+		return invalid(fmt.Errorf("deploy already running"))
+	}
+	return nil
+}
+
 func (s *server) CreateBuild(_ context.Context, req *connect.Request[v1.CreateBuildRequest]) (*connect.Response[v1.Build], error) {
 	job, err := s.getJob(req.Msg.Name)
 	if err != nil {
@@ -497,6 +519,9 @@ func (s *server) CreateBuild(_ context.Context, req *connect.Request[v1.CreateBu
 	branch := strings.TrimSpace(req.Msg.Branch)
 	if err := checkBranch(branch); err != nil {
 		return nil, invalid(err)
+	}
+	if err := s.idleBuild(job.Name); err != nil {
+		return nil, err
 	}
 	ver := time.Now().Format("20060102-150405")
 	binPath := filepath.Join(s.root, "artifacts", job.Name, ver, job.Name)
@@ -522,28 +547,30 @@ func (s *server) CreateBuild(_ context.Context, req *connect.Request[v1.CreateBu
 
 func (s *server) runBuild(id int64, job scmJob, branch, ver, binPath string, live *liveRun) {
 	defer lives.Delete(id)
-	save := func(status, commit string, runErr error) {
-		if runErr != nil {
-			fmt.Fprintf(live, "%s\n", runErr)
-		}
-		logText := live.String()
-		_, _ = s.db.Exec(
-			`UPDATE scm_build SET bin_path=?, status=?, log_text=?, git_commit=? WHERE id=?`,
-			binPath, status, logText, commit, id,
-		)
-		out := map[string]any{
-			"status": status, "service": job.Name, "version": ver,
-			"binPath": binPath, "branch": branch, "commit": commit, "id": id,
-		}
-		if runErr != nil {
-			out["error"] = runErr.Error()
-		}
-		live.finish(out)
+	commit, err := s.compileJob(job, branch, ver, binPath, live)
+	status := "ok"
+	if err != nil {
+		status = "fail"
+		fmt.Fprintf(live, "%s\n", err)
 	}
+	_, _ = s.db.Exec(
+		`UPDATE scm_build SET bin_path=?, status=?, log_text=?, git_commit=? WHERE id=?`,
+		binPath, status, live.String(), commit, id,
+	)
+	out := map[string]any{
+		"status": status, "service": job.Name, "version": ver,
+		"binPath": binPath, "branch": branch, "commit": commit, "id": id,
+	}
+	if err != nil {
+		out["error"] = err.Error()
+	}
+	live.finish(out)
+}
+
+func (s *server) compileJob(job scmJob, branch, ver, binPath string, live *liveRun) (string, error) {
 	repo, err := s.gitSync(job.Name, job.GitURL, branch, live)
 	if err != nil {
-		save("fail", "", err)
-		return
+		return "", err
 	}
 	commit := ""
 	if out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output(); err == nil {
@@ -551,29 +578,24 @@ func (s *server) runBuild(id int64, job scmJob, branch, ver, binPath string, liv
 		fmt.Fprintf(live, "commit %s\n", commit)
 	}
 	if _, err := scriptInRepo(repo, job.ScriptPath); err != nil {
-		save("fail", commit, err)
-		return
+		return commit, err
 	}
 	outDir := filepath.Dir(binPath)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		save("fail", commit, err)
-		return
+		return commit, err
 	}
 	if job.Label == "image" {
 		fmt.Fprintf(live, "$ git archive HEAD -> %s\n", binPath)
 		cmd := exec.Command("git", "-C", repo, "archive", "--format=tar", "-o", binPath, "HEAD")
 		cmd.Stdout = live
 		cmd.Stderr = live
-		err = cmd.Run()
-		status := "ok"
-		if err != nil {
-			status = "fail"
-		} else if _, stErr := os.Stat(binPath); stErr != nil {
-			status = "fail"
-			err = fmt.Errorf("git archive missing %s", binPath)
+		if err := cmd.Run(); err != nil {
+			return commit, err
 		}
-		save(status, commit, err)
-		return
+		if _, stErr := os.Stat(binPath); stErr != nil {
+			return commit, fmt.Errorf("git archive missing %s", binPath)
+		}
+		return commit, nil
 	}
 	arch := dockerArch()
 	fmt.Fprintf(live, "$ sh %s\n(dir=%s out=%s)\n", job.ScriptPath, repo, outDir)
@@ -590,15 +612,13 @@ func (s *server) runBuild(id int64, job scmJob, branch, ver, binPath string, liv
 	)
 	cmd.Stdout = live
 	cmd.Stderr = live
-	err = cmd.Run()
-	status := "ok"
-	if err != nil {
-		status = "fail"
-	} else if _, stErr := os.Stat(binPath); stErr != nil {
-		status = "fail"
-		err = fmt.Errorf("script ok but missing %s; write the binary to $SCM_OUT/$SCM_NAME", binPath)
+	if err := cmd.Run(); err != nil {
+		return commit, err
 	}
-	save(status, commit, err)
+	if _, stErr := os.Stat(binPath); stErr != nil {
+		return commit, fmt.Errorf("script ok but missing %s; write the binary to $SCM_OUT/$SCM_NAME", binPath)
+	}
+	return commit, nil
 }
 
 func (s *server) ListPublishes(context.Context, *connect.Request[v1.ListPublishesRequest]) (*connect.Response[v1.ListPublishesResponse], error) {
@@ -915,6 +935,12 @@ func (s *server) CreateDeploy(_ context.Context, req *connect.Request[v1.CreateD
 	if err != nil {
 		return nil, invalid(err)
 	}
+	if err := s.idleDeploy(app.Name); err != nil {
+		return nil, err
+	}
+	if branch := strings.TrimSpace(req.Msg.Branch); branch != "" {
+		return s.createBuildDeploy(app, branch)
+	}
 	ver := strings.TrimSpace(req.Msg.Version)
 	if ver == "" || strings.Contains(ver, "/") || strings.Contains(ver, "..") {
 		return nil, invalid(fmt.Errorf("bad version"))
@@ -960,6 +986,76 @@ func (s *server) CreateDeploy(_ context.Context, req *connect.Request[v1.CreateD
 	lives.Store(id, live)
 	go s.runDeploy(id, app, ver, src, label, live)
 	return connect.NewResponse(&v1.Deploy{Id: id, Service: app.Name, Version: ver, Status: "running"}), nil
+}
+
+func (s *server) createBuildDeploy(app deployApp, branch string) (*connect.Response[v1.Deploy], error) {
+	if err := checkBranch(branch); err != nil {
+		return nil, invalid(err)
+	}
+	job, err := s.getJob(app.ScmName)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	if err := s.idleBuild(job.Name); err != nil {
+		return nil, err
+	}
+	label := job.Label
+	if label == "" {
+		label = "golang"
+	}
+	ver := time.Now().Format("20060102-150405")
+	binPath := filepath.Join(s.root, "artifacts", job.Name, ver, job.Name)
+	res, err := s.db.Exec(
+		`INSERT INTO scm_build (service, version, bin_path, status, log_text, branch, git_commit) VALUES (?,?,?,?,?,?,?)`,
+		job.Name, ver, binPath, "running", "", branch, "",
+	)
+	if err != nil {
+		return nil, internal(err)
+	}
+	buildID, err := res.LastInsertId()
+	if err != nil {
+		return nil, internal(err)
+	}
+	res, err = s.db.Exec(
+		`INSERT INTO deploy_record (service, version, status, log_text) VALUES (?,?,?,?)`,
+		app.Name, ver, "running", "",
+	)
+	if err != nil {
+		_, _ = s.db.Exec(`UPDATE scm_build SET status=? WHERE id=?`, "fail", buildID)
+		return nil, internal(err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		_, _ = s.db.Exec(`UPDATE scm_build SET status=? WHERE id=?`, "fail", buildID)
+		_, _ = s.db.Exec(`UPDATE deploy_record SET status=? WHERE service=? AND version=? AND status='running'`, "fail", app.Name, ver)
+		return nil, internal(err)
+	}
+	live := &liveRun{}
+	lives.Store(id, live)
+	go s.runBuildDeploy(buildID, id, job, app, branch, ver, binPath, label, live)
+	return connect.NewResponse(&v1.Deploy{Id: id, Service: app.Name, Version: ver, Status: "running"}), nil
+}
+
+func (s *server) runBuildDeploy(buildID, deployID int64, job scmJob, app deployApp, branch, ver, binPath, label string, live *liveRun) {
+	commit, err := s.compileJob(job, branch, ver, binPath, live)
+	status := "ok"
+	if err != nil {
+		status = "fail"
+		fmt.Fprintf(live, "%s\n", err)
+	}
+	_, _ = s.db.Exec(
+		`UPDATE scm_build SET bin_path=?, status=?, log_text=?, git_commit=? WHERE id=?`,
+		binPath, status, live.String(), commit, buildID,
+	)
+	if err != nil {
+		_, _ = s.db.Exec(`UPDATE deploy_record SET status=?, log_text=? WHERE id=?`, "fail", live.String(), deployID)
+		live.finish(map[string]any{
+			"status": "fail", "service": app.Name, "version": ver, "id": deployID, "error": err.Error(),
+		})
+		lives.Delete(deployID)
+		return
+	}
+	s.runDeploy(deployID, app, ver, binPath, label, live)
 }
 
 func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live *liveRun) {

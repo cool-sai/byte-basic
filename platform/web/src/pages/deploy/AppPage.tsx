@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { Button, Card, Message, Modal, Radio, Select, Table, Tag, Typography } from "@arco-design/web-react";
+import { Button, Message, Modal, Radio, Select, Table, Tag, Typography } from "@arco-design/web-react";
 import { useRequest } from "ahooks";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, errMsg, type Build, type Container, type DeployRecord } from "../../api";
 import LabelIcon from "../scm/LabelIcon";
-import LogBox from "../scm/LogBox";
 import AppForm from "./AppForm";
 import Crumbs from "./Crumbs";
 
@@ -17,7 +16,6 @@ export default function AppPage() {
   const [mode, setMode] = useState<"artifact" | "build">("artifact");
   const [version, setVersion] = useState("");
   const [branch, setBranch] = useState("");
-  const [liveLog, setLiveLog] = useState("");
 
   const { data, loading, error, refresh } = useRequest(
     async () => {
@@ -41,6 +39,7 @@ export default function AppPage() {
   const compose = app?.compose || [];
   const runtime = (data?.runtime || []).filter((c) => compose.includes(c.Service || ""));
   const scmName = app?.scmName || "";
+  const running = deploys.find((d) => d.status === "running");
 
   const { data: formMeta } = useRequest(
     async () => ({
@@ -62,31 +61,23 @@ export default function AppPage() {
 
   const { run: deploy, loading: busy } = useRequest(
     async (ver: string, doBuild: boolean, brName: string) => {
-      setLiveLog("");
-      let version = ver;
       if (doBuild) {
         if (!scmName) {
           throw new Error("未关联 SCM");
         }
-        const row = await api.createBuild(scmName, brName);
-        version = row.version;
-        await api.watchBuild(row.id, (text) => setLiveLog((cur) => cur + text));
+        return api.createDeploy(name, "", brName);
       }
-      await api.deploy(name, version, (text) => setLiveLog((cur) => cur + text));
-      return version;
+      return api.createDeploy(name, ver);
     },
     {
       manual: true,
-      onSuccess: (ver) => {
-        Message.success("已部署 " + name + " @ " + ver);
-        setOpen(false);
-        void refresh();
-      },
+      onSuccess: (row) => navigate("/deploy/" + name + "/runs/" + row.id),
       onError: (e) => Message.error(errMsg(e)),
     },
   );
 
-  const canOk = mode === "build" ? Boolean(branch) : Boolean(version);
+  const building = (data?.builds || []).some((b) => b.status === "running");
+  const canOk = mode === "build" ? Boolean(branch) && !building : Boolean(version);
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -138,9 +129,8 @@ export default function AppPage() {
           </Button>
           <Button
             type="primary"
-            disabled={!app}
+            disabled={!app || !!running || busy}
             onClick={() => {
-              setLiveLog("");
               setMode(okBuilds.length ? "artifact" : "build");
               setOpen(true);
             }}
@@ -150,12 +140,6 @@ export default function AppPage() {
         </div>
       </div>
       {error ? <Typography.Text type="error">{errMsg(error)}</Typography.Text> : null}
-
-      {busy || liveLog ? (
-        <Card title="本次部署">
-          <LogBox text={liveLog} live={busy} />
-        </Card>
-      ) : null}
 
       <Typography.Title heading={5}>运行中的容器</Typography.Title>
       <Table
@@ -185,7 +169,9 @@ export default function AppPage() {
           {
             title: "状态",
             dataIndex: "status",
-            render: (v: string) => <Tag color={v === "ok" ? "green" : "red"}>{v}</Tag>,
+            render: (v: string) => (
+              <Tag color={v === "ok" ? "green" : v === "running" ? "arcoblue" : "red"}>{v}</Tag>
+            ),
           },
           { title: "时间", dataIndex: "createdAt" },
         ]}
@@ -218,7 +204,7 @@ export default function AppPage() {
         }}
         onOk={() => void deploy(version, mode === "build", branch)}
         confirmLoading={busy}
-        okButtonProps={{ disabled: !canOk || busy }}
+        okButtonProps={{ disabled: !canOk || busy || !!running }}
         okText={mode === "build" ? "编译并部署" : "打镜像并启动"}
         style={{ width: 640 }}
       >
@@ -230,6 +216,7 @@ export default function AppPage() {
           {mode === "build" ? (
             <div className="flex w-full flex-col gap-2">
               {brErr ? <Typography.Text type="error">{errMsg(brErr)}</Typography.Text> : null}
+              {building ? <Typography.Text type="warning">已有编译在进行</Typography.Text> : null}
               <Select
                 className="w-full"
                 loading={brLoading}
@@ -263,7 +250,6 @@ export default function AppPage() {
               ))}
             </Select>
           )}
-          {busy || liveLog ? <LogBox text={liveLog} live={busy} /> : null}
         </div>
       </Modal>
     </div>

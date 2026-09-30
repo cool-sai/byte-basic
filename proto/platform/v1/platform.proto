@@ -462,6 +462,7 @@ message WatchDeployRequest {
 message CreateDeployRequest {
   string service = 1;
   string version = 2;
+  string branch = 3;
 }
 
 message Container {

@@ -512,10 +512,10 @@ export const api = {
   deploys: (service?: string) =>
     client.listDeploys(service ? { service } : {}).then((r) => r.deploys.map(deploy)),
   deployDetail: (id: number) => client.getDeploy({ id: BigInt(id) }).then(deploy),
-  deploy: async (service: string, version: string, onLog: (text: string) => void) => {
-    const d = await client.createDeploy({ service, version });
-    return consumeRun(client.watchDeploy({ id: d.id }), onLog);
-  },
+  createDeploy: (service: string, version: string, branch = "") =>
+    client.createDeploy({ service, version, branch }).then(deploy),
+  watchDeploy: (id: number, onLog: (text: string) => void) =>
+    consumeRun(client.watchDeploy({ id: BigInt(id) }), onLog),
   runtime: () =>
     client.runtime({}).then((r) =>
       r.containers.map((c) => ({
