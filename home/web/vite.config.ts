@@ -9,11 +9,12 @@ export default defineConfig({
     port: 5175,
     allowedHosts: [".ls-byte-basic.com"],
     proxy: {
-      "/api": {
+      "/api/home.v1.HomeService": {
         target: "http://127.0.0.1:8082",
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, "") || "/",
       },
-      "/home.v1.HomeService": {
+      "/api": {
         target: "http://127.0.0.1:8082",
         changeOrigin: true,
       },

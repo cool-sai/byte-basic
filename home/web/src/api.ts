@@ -5,6 +5,6 @@ import { HomeService } from "./gen/home/v1/home_pb";
 export const client = createClient(
   HomeService,
   createConnectTransport({
-    baseUrl: "/",
+    baseUrl: "/api",
   }),
 );
