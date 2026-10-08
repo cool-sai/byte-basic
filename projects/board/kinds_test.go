@@ -14,7 +14,7 @@ func TestKindsPageAndItemsAPI(t *testing.T) {
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 
-	res, err := http.Get(ts.URL + "/board/kinds/")
+	res, err := http.Get(ts.URL + "/kinds/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestKindsPageAndItemsAPI(t *testing.T) {
 		t.Fatalf("page %d %s", res.StatusCode, b)
 	}
 
-	res, err = http.Get(ts.URL + "/board/api/items")
+	res, err = http.Get(ts.URL + "/api/items")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestKindsPageAndItemsAPI(t *testing.T) {
 	call := func(name, args string) {
 		t.Helper()
 		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":` + args + `}}`
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", strings.NewReader(body))
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
 		req.Header.Set("Authorization", "Bearer secret")
@@ -54,7 +54,7 @@ func TestKindsPageAndItemsAPI(t *testing.T) {
 	call("add_item", `{"kind":"算法","content":"题1","date":"2026-09-21"}`)
 	call("add_item", `{"kind":"算法","content":"题2","date":"2026-09-20"}`)
 
-	res, err = http.Get(ts.URL + "/board/api/items?kind=%E7%AE%97%E6%B3%95&page=1&page_size=1")
+	res, err = http.Get(ts.URL + "/api/items?kind=%E7%AE%97%E6%B3%95&page=1&page_size=1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestKindsPageAndItemsAPI(t *testing.T) {
 		t.Fatalf("newest first %+v", page.Items[0])
 	}
 
-	res, err = http.Get(ts.URL + "/board/api/items?kind=nope")
+	res, err = http.Get(ts.URL + "/api/items?kind=nope")
 	if err != nil {
 		t.Fatal(err)
 	}

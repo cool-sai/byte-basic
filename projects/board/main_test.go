@@ -21,10 +21,34 @@ func testMux(t *testing.T, token string) http.Handler {
 	return newMux(token, newMemBoard(), ts)
 }
 
+func TestPageRedirectKeepsPublicPrefix(t *testing.T) {
+	ts := httptest.NewServer(testMux(t, "secret"))
+	t.Cleanup(ts.Close)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	res, err := client.Get(ts.URL + "/kinds")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/board/kinds/" {
+		t.Fatalf("redirect %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	res, err = client.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("index %d", res.StatusCode)
+	}
+}
+
 func TestHealthAndEmptyStats(t *testing.T) {
 	ts := httptest.NewServer(testMux(t, "secret"))
 	t.Cleanup(ts.Close)
-	res, err := http.Get(ts.URL + "/board/api/health")
+	res, err := http.Get(ts.URL + "/api/health")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +56,7 @@ func TestHealthAndEmptyStats(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("health %d", res.StatusCode)
 	}
-	res, err = http.Get(ts.URL + "/board/api/kv/stats")
+	res, err = http.Get(ts.URL + "/api/kv/stats")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +70,7 @@ func TestMCPUnauthorized(t *testing.T) {
 	ts := httptest.NewServer(testMux(t, "secret"))
 	t.Cleanup(ts.Close)
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_items","arguments":{"kind":"算法"}}}`
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	res, err := http.DefaultClient.Do(req)
@@ -57,7 +81,7 @@ func TestMCPUnauthorized(t *testing.T) {
 	if res.StatusCode != 401 {
 		t.Fatalf("no token: %d", res.StatusCode)
 	}
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", strings.NewReader(body))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Authorization", "Bearer wrong")
@@ -75,7 +99,7 @@ func TestMCPInstructions(t *testing.T) {
 	ts := httptest.NewServer(testMux(t, "secret"))
 	t.Cleanup(ts.Close)
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Authorization", "Bearer secret")
@@ -107,7 +131,7 @@ func TestMCPUpdateThenRead(t *testing.T) {
 	call := func(name, args string) map[string]any {
 		t.Helper()
 		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":` + args + `}}`
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", bytes.NewBufferString(body))
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
 		req.Header.Set("Authorization", "Bearer secret")
@@ -133,7 +157,7 @@ func TestMCPUpdateThenRead(t *testing.T) {
 	if add["error"] != nil {
 		t.Fatalf("add_item %+v", add["error"])
 	}
-	res, err := http.Get(ts.URL + "/board/api/kv/stats")
+	res, err := http.Get(ts.URL + "/api/kv/stats")
 	if err != nil {
 		t.Fatal(err)
 	}

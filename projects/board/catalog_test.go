@@ -12,7 +12,7 @@ import (
 func TestToolCatalogPageAndAPI(t *testing.T) {
 	ts := httptest.NewServer(testMux(t, "secret"))
 	t.Cleanup(ts.Close)
-	res, err := http.Get(ts.URL + "/board/api/tools")
+	res, err := http.Get(ts.URL + "/api/tools")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestToolCatalogPageAndAPI(t *testing.T) {
 	}
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Authorization", "Bearer secret")
@@ -73,7 +73,7 @@ func TestToolCatalogPageAndAPI(t *testing.T) {
 		}
 	}
 
-	res, err = http.Get(ts.URL + "/board/tools/")
+	res, err = http.Get(ts.URL + "/tools/")
 	if err != nil {
 		t.Fatal(err)
 	}

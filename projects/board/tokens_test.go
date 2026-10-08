@@ -15,7 +15,7 @@ func TestTokenCreateListDeleteAndMCP(t *testing.T) {
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/board/api/tokens", strings.NewReader(`{"name":"grok bot"}`))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tokens", strings.NewReader(`{"name":"grok bot"}`))
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -26,7 +26,7 @@ func TestTokenCreateListDeleteAndMCP(t *testing.T) {
 		t.Fatalf("create without admin: %d", res.StatusCode)
 	}
 
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/board/api/tokens", strings.NewReader(`{"name":"grok bot"}`))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/tokens", strings.NewReader(`{"name":"grok bot"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer secret")
 	res, err = http.DefaultClient.Do(req)
@@ -52,7 +52,7 @@ func TestTokenCreateListDeleteAndMCP(t *testing.T) {
 		t.Fatalf("created %+v", created)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/board/api/tokens", nil)
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/tokens", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	res, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestTokenCreateListDeleteAndMCP(t *testing.T) {
 	}
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_kind","arguments":{"name":"算法"}}}`
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", strings.NewReader(body))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Authorization", "Bearer "+created.Token)
@@ -79,7 +79,7 @@ func TestTokenCreateListDeleteAndMCP(t *testing.T) {
 		t.Fatalf("mcp named token %d %s", res.StatusCode, b)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/board/api/tokens", nil)
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/tokens", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	res, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestTokenCreateListDeleteAndMCP(t *testing.T) {
 		t.Fatalf("expected last_used_at %s", b)
 	}
 
-	req, _ = http.NewRequest(http.MethodDelete, ts.URL+"/board/api/tokens/"+created.ID, nil)
+	req, _ = http.NewRequest(http.MethodDelete, ts.URL+"/api/tokens/"+created.ID, nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	res, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -102,7 +102,7 @@ func TestTokenCreateListDeleteAndMCP(t *testing.T) {
 		t.Fatalf("delete %d", res.StatusCode)
 	}
 
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", strings.NewReader(body))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Authorization", "Bearer "+created.Token)
@@ -119,7 +119,7 @@ func TestTokenCreateListDeleteAndMCP(t *testing.T) {
 func TestCreateRejectsEmptyName(t *testing.T) {
 	ts := httptest.NewServer(testMux(t, "secret"))
 	t.Cleanup(ts.Close)
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/board/api/tokens", strings.NewReader(`{"name":"  "}`))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/tokens", strings.NewReader(`{"name":"  "}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer secret")
 	res, err := http.DefaultClient.Do(req)

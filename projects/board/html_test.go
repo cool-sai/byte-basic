@@ -20,7 +20,7 @@ func TestKindHTMLCRUDAndRender(t *testing.T) {
 			t.Fatal(err)
 		}
 		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":` + string(raw) + `}}`
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/board/mcp", strings.NewReader(body))
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
 		req.Header.Set("Authorization", "Bearer secret")
@@ -70,7 +70,7 @@ func TestKindHTMLCRUDAndRender(t *testing.T) {
 
 	items := func() ListPage {
 		t.Helper()
-		res, err := http.Get(ts.URL + "/board/api/items?kind=" + "%E7%AE%97%E6%B3%95")
+		res, err := http.Get(ts.URL + "/api/items?kind=" + "%E7%AE%97%E6%B3%95")
 		if err != nil {
 			t.Fatal(err)
 		}

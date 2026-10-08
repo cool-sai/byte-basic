@@ -54,10 +54,11 @@ func main() {
 
 func newMux(admin string, board Board, tokens *TokenStore) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /board/api/health", func(w http.ResponseWriter, _ *http.Request) {
+	// 浏览器地址仍是 /board/...。TLB 剥掉这段前缀后，进程只看到后面的路径。
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
-	mux.HandleFunc("GET /board/api/kv/stats", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/kv/stats", func(w http.ResponseWriter, _ *http.Request) {
 		sum, err := board.Summary()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -66,23 +67,20 @@ func newMux(admin string, board Board, tokens *TokenStore) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, sum)
 	})
-	mux.HandleFunc("GET /board", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/board/", http.StatusFound)
-	})
-	mux.HandleFunc("GET /board/{$}", serveIndex)
-	mux.HandleFunc("GET /board/tokens", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /{$}", serveIndex)
+	mux.HandleFunc("GET /tokens", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/board/tokens/", http.StatusFound)
 	})
-	mux.HandleFunc("GET /board/tokens/{$}", serveTokens)
-	mux.HandleFunc("GET /board/tools", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /tokens/{$}", serveTokens)
+	mux.HandleFunc("GET /tools", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/board/tools/", http.StatusFound)
 	})
-	mux.HandleFunc("GET /board/tools/{$}", serveTools)
-	mux.HandleFunc("GET /board/kinds", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /tools/{$}", serveTools)
+	mux.HandleFunc("GET /kinds", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/board/kinds/", http.StatusFound)
 	})
-	mux.HandleFunc("GET /board/kinds/{$}", serveKinds)
-	mux.HandleFunc("GET /board/api/items", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /kinds/{$}", serveKinds)
+	mux.HandleFunc("GET /api/items", func(w http.ResponseWriter, r *http.Request) {
 		kind := strings.TrimSpace(r.URL.Query().Get("kind"))
 		if kind == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kind required"})
@@ -103,7 +101,7 @@ func newMux(admin string, board Board, tokens *TokenStore) http.Handler {
 		writeJSON(w, http.StatusOK, p)
 	})
 	server := newMCPServer(board)
-	mux.HandleFunc("GET /board/api/tools", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/tools", func(w http.ResponseWriter, _ *http.Request) {
 		docs, err := catalogFromMCP(server)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -113,10 +111,10 @@ func newMux(admin string, board Board, tokens *TokenStore) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"tools": docs})
 	})
 	adminOK := func(got string) bool { return matchAdmin(admin, got) }
-	mux.Handle("GET /board/api/tokens", requireBearer(adminOK, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	mux.Handle("GET /api/tokens", requireBearer(adminOK, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens.List()})
 	})))
-	mux.Handle("POST /board/api/tokens", requireBearer(adminOK, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /api/tokens", requireBearer(adminOK, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Name string `json:"name"`
 		}
@@ -134,7 +132,7 @@ func newMux(admin string, board Board, tokens *TokenStore) http.Handler {
 			"created_at": view.CreatedAt, "token": raw,
 		})
 	})))
-	mux.Handle("DELETE /board/api/tokens/{id}", requireBearer(adminOK, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("DELETE /api/tokens/{id}", requireBearer(adminOK, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if err := tokens.Delete(id); err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -149,8 +147,8 @@ func newMux(admin string, board Board, tokens *TokenStore) http.Handler {
 		return tokens.Match(got)
 	}
 	mcpH := requireBearer(mcpOK, newMCPHandler(server))
-	mux.Handle("/board/mcp", mcpH)
-	mux.Handle("/board/mcp/", mcpH)
+	mux.Handle("/mcp", mcpH)
+	mux.Handle("/mcp/", mcpH)
 	return mux
 }
 
