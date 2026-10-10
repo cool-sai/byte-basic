@@ -1110,6 +1110,21 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 		return
 	}
 	fmt.Fprintf(live, "$ docker compose up --no-deps --force-recreate -d %s\n", strings.Join(app.Compose, " "))
+	replacesSelf := false
+	for _, svc := range app.Compose {
+		if svc == "platform" {
+			replacesSelf = true
+			break
+		}
+	}
+	if replacesSelf {
+		// compose 会换掉当前进程，写完再换，失败且进程还在时改回 fail。
+		finish("ok", nil)
+		if err := s.composeUp(live, app.Compose); err != nil {
+			finish("fail", err)
+		}
+		return
+	}
 	if err := s.composeUp(live, app.Compose); err != nil {
 		finish("fail", err)
 		return
