@@ -37,7 +37,7 @@ export default function App() {
         </div>
       </main>
 
-      <footer className="px-4 py-5 text-center">
+      <footer className="flex flex-col items-center gap-2 px-4 py-5 sm:flex-row sm:gap-4">
         <a
           href="https://beian.miit.gov.cn/"
           target="_blank"
@@ -45,6 +45,15 @@ export default function App() {
           className="text-sm text-mute no-underline hover:text-ink hover:underline"
         >
           京ICP备19043673号
+        </a>
+        <a
+          href="https://beian.mps.gov.cn/#/query/webSearch?code=11010802033082"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-sm text-mute no-underline hover:text-ink hover:underline"
+        >
+          <img src="/gongan.png" alt="" width={16} height={16} />
+          京公网安备11010802033082号
         </a>
       </footer>
     </div>
