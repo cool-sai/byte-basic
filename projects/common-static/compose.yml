@@ -1,0 +1,14 @@
+services:
+  common-static:
+    build:
+      context: ../..
+      dockerfile: projects/common-static/Dockerfile
+    image: minikitex-common-static:local
+    hostname: common-static
+    environment:
+      LISTEN: "0.0.0.0:8092"
+      ORIGIN: "http://img.lssl.work"
+      TZ: Asia/Shanghai
+    expose:
+      - "8092"
+    pull_policy: never

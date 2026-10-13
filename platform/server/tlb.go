@@ -177,6 +177,7 @@ func seedTlb(db *sql.DB) error {
 		migrateTlbMinikite(db)
 		seedTlbHome(db, consoleID)
 		seedTlbBoard(db, consoleID)
+		seedTlbCommonStatic(db, consoleID)
 		return nil
 	}
 	for _, r := range []tlbRoute{
@@ -195,6 +196,7 @@ func seedTlb(db *sql.DB) error {
 	migrateTlbMinikite(db)
 	seedTlbHome(db, consoleID)
 	seedTlbBoard(db, consoleID)
+	seedTlbCommonStatic(db, consoleID)
 	return nil
 }
 
@@ -226,6 +228,14 @@ func seedTlbBoard(db *sql.DB, consoleID int64) {
 		`INSERT IGNORE INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`,
 		consoleID, "board", "/board", "board:8090",
 	)
+}
+
+func seedTlbCommonStatic(db *sql.DB, consoleID int64) {
+	_, _ = db.Exec(
+		`INSERT IGNORE INTO tlb_route (site_id, name, path_prefix, target) VALUES (?,?,?,?)`,
+		consoleID, "common-static", "/common-static", "common-static:8092",
+	)
+	_, _ = db.Exec(`UPDATE tlb_route SET target='common-static:8092' WHERE name='common-static' AND target='agent:80'`)
 }
 
 func (s *server) getTlbSite(name string) (tlbSite, error) {
