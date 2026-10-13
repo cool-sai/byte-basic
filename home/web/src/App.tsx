@@ -37,7 +37,7 @@ export default function App() {
         </div>
       </main>
 
-      <footer className="flex flex-col items-center gap-2 px-4 py-5 sm:flex-row sm:gap-4">
+      <footer className="flex w-full min-w-0 flex-col items-center gap-2 px-4 py-5 sm:flex-row sm:justify-center sm:gap-4">
         <a
           href="https://beian.miit.gov.cn/"
           target="_blank"
