@@ -25,19 +25,19 @@
 
 ## 部署顺序
 
-1. **上线代码**：提交并推到 Gitee，按平时方式更新 platform（含 tlb.go 改动），同时把仓库同步到服务器 `/work`
+1. **上线代码**：提交并推到 Gitee，按平时方式更新 platform（含 tlb.go 改动），同时把仓库同步到服务器 `/opt/byte-basic`（容器内为 `/work`）
    （`scripts/` 和 `deploy/systemd/` 要在宿主机上用）。
 
 2. **一次性准备（服务器 root）**：
    ```bash
-   cd /work
-   echo "DAILY_NEWS_HOOK_SECRET=$(openssl rand -hex 32)" >> /work/.env && chmod 600 /work/.env
-   grep DAILY_NEWS_HOOK_SECRET /work/.env        # 记下，GitHub 要填
+   cd /opt/byte-basic
+   echo "DAILY_NEWS_HOOK_SECRET=$(openssl rand -hex 32)" >> /opt/byte-basic/.env && chmod 600 /opt/byte-basic/.env
+   grep DAILY_NEWS_HOOK_SECRET /opt/byte-basic/.env        # 记下，GitHub 要填
    chmod +x scripts/daily-news-pull.sh scripts/cert.sh
    scripts/daily-news-pull.sh                    # 首次 clone 到 /srv/daily-news，GitHub 不通可多试几次
    ls /srv/daily-news/index.html
    ```
-   `.env` 在 `/work` 下，平台执行 compose 时会自动读取；不要提交到仓库。
+   `.env` 在 `/opt/byte-basic`（容器内为 `/work`） 下，平台执行 compose 时会自动读取；不要提交到仓库。
 
 3. **平台 SCM → 新建任务**（两个，Git 都填 golang 仓库的 Gitee 地址，label 选 `image`）：
    - 名称 `daily-news`，脚本 `projects/daily-news/Dockerfile`
@@ -56,7 +56,7 @@
 
 6. **签证书**（http-01，走 tlb 80 端口默认 server 的 `/.well-known/acme-challenge/`）：
    ```bash
-   /work/scripts/cert.sh issue news.lssl.work 你的邮箱
+   /opt/byte-basic/scripts/cert.sh issue news.lssl.work 你的邮箱
    ```
 
 7. **平台 TLB**：新建站点 `news`，host `news.lssl.work`；新建两条路由：
@@ -80,19 +80,19 @@
 
 10. **证书续期定时器**：
     ```bash
-    cp /work/deploy/systemd/cert-renew.* /etc/systemd/system/
+    cp /opt/byte-basic/deploy/systemd/cert-renew.* /etc/systemd/system/
     systemctl daemon-reload && systemctl enable --now cert-renew.timer
-    /work/scripts/cert.sh renew   # 手动跑一次看日志，未到期会显示 not due
+    /opt/byte-basic/scripts/cert.sh renew   # 手动跑一次看日志，未到期会显示 not due
     ```
 
 11. 都正常后，去 GitHub Pages 设置里去掉 `news.lssl.work` 自定义域名（仓库里的 CNAME 文件一并删除）。
 
 更新：改 `projects/daily-news*` 后推 Gitee，平台里对应应用点部署即可。
-更换密钥：改 `/work/.env`，平台里重新部署 `daily-news-hook`，再改 GitHub 里的 Secret。
+更换密钥：改 `/opt/byte-basic/.env`，平台里重新部署 `daily-news-hook`，再改 GitHub 里的 Secret。
 
 ## 回滚
 
-- 停自动更新：GitHub 里把 webhook 取消 Active 或删除；之后需要时手动跑 `/work/scripts/daily-news-pull.sh`。
+- 停自动更新：GitHub 里把 webhook 取消 Active 或删除；之后需要时手动跑 `/opt/byte-basic/scripts/daily-news-pull.sh`。
 - 撤站点：平台 TLB 删除 `news` 站点 → 发布；平台部署里删除应用 `daily-news-hook`、`daily-news`
   （平台会 stop/rm 容器并删掉 `deploy/runtime/<服务>.yml`）；DNS 把 `news` 改回 CNAME `cool-sai.github.io`
   （GitHub Pages 自定义域名还在的话立即恢复）。
@@ -106,9 +106,9 @@
 lssl.work 12/1 到期，img.lssl.work 2027-01-07 到期。确认两个域名都 A 记录指向本机后，可各重签一次转为 webroot：
 
 ```bash
-CERTBOT_EXTRA=--force-renewal /work/scripts/cert.sh issue lssl.work 你的邮箱 www.lssl.work
-CERTBOT_EXTRA=--force-renewal /work/scripts/cert.sh issue img.lssl.work 你的邮箱
-/work/scripts/cert.sh list    # 确认域名和到期时间
+CERTBOT_EXTRA=--force-renewal /opt/byte-basic/scripts/cert.sh issue lssl.work 你的邮箱 www.lssl.work
+CERTBOT_EXTRA=--force-renewal /opt/byte-basic/scripts/cert.sh issue img.lssl.work 你的邮箱
+/opt/byte-basic/scripts/cert.sh list    # 确认域名和到期时间
 ```
 
 `--cert-name` 与原证书相同，会原地替换 `live/<名字>/`，路径不变，tlb 配置不用改。
@@ -118,6 +118,6 @@ CERTBOT_EXTRA=--force-renewal /work/scripts/cert.sh issue img.lssl.work 你的�
 
 - 磁盘剩余约 8G：两个镜像共约 150MB，hook 基于 python:3.12-alpine（约 135MB），certbot 镜像约 100MB。
 - hook 容器以 root 运行并读写挂载整个 `/srv`；手动 pull 与 webhook pull 不共用锁，手动拉时避开推送。
-- 没有定时兜底：webhook 投递失败或服务器访问 GitHub 失败时站点停在旧内容，直到下一次 push；可在 GitHub Recent Deliveries 里 Redeliver，或手动跑 `/work/scripts/daily-news-pull.sh`。日志看 `docker logs golang-daily-news-hook-1`（或平台运行时页面）。
+- 没有定时兜底：webhook 投递失败或服务器访问 GitHub 失败时站点停在旧内容，直到下一次 push；可在 GitHub Recent Deliveries 里 Redeliver，或手动跑 `/opt/byte-basic/scripts/daily-news-pull.sh`。日志看 `docker logs golang-daily-news-hook-1`（或平台运行时页面）。
 - `cert.sh` 默认容器名 `golang-tlb-1`、卷名 `golang_letsencrypt` / `golang_tlb-acme`，不同可用
   `TLB_CONTAINER` / `LE_VOL` / `ACME_VOL` 覆盖。
