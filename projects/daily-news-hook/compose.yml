@@ -1,0 +1,20 @@
+# GitHub push webhook 接收器。tlb 路由 news.lssl.work /_hook -> daily-news-hook:8080。
+# 密钥在 /work/.env 的 DAILY_NEWS_HOOK_SECRET；为空时本容器拒绝启动（不用 :?，避免拖垮平台其他 compose 命令）。
+services:
+  daily-news-hook:
+    build:
+      context: ../..
+      dockerfile: projects/daily-news-hook/Dockerfile
+    image: minikitex-daily-news-hook:local
+    hostname: daily-news-hook
+    command: ["python", "/app/app.py"]
+    environment:
+      DAILY_NEWS_HOOK_SECRET: ${DAILY_NEWS_HOOK_SECRET:-}
+      DAILY_NEWS_DIR: /srv/daily-news
+      TZ: Asia/Shanghai
+    volumes:
+      - /srv:/srv   # 挂父目录：首次 clone 需在 /srv 下建临时目录再 mv
+    expose:
+      - "8080"
+    restart: unless-stopped
+    pull_policy: never

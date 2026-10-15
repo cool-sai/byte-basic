@@ -1,0 +1,16 @@
+# 晨报静态站。内容来自宿主机 /srv/daily-news（daily-news-hook 收到 push 后拉取），只读挂载。
+services:
+  daily-news:
+    build:
+      context: ../..
+      dockerfile: projects/daily-news/Dockerfile
+    image: minikitex-daily-news:local
+    hostname: daily-news
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - /srv/daily-news:/usr/share/nginx/html:ro
+    expose:
+      - "80"
+    restart: unless-stopped
+    pull_policy: never

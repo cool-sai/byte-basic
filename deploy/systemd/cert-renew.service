@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew Let's Encrypt certificates for tlb (webroot http-01)
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/work/scripts/cert.sh renew
+StandardOutput=append:/var/log/cert-renew.log
+StandardError=append:/var/log/cert-renew.log

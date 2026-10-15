@@ -554,7 +554,7 @@ http {
         client_max_body_size 32m;
 `, listen, extra, st.Host)
 		if tlbTLSOn() {
-			dir := tlbTLSDir()
+			dir := tlbSiteTLSDir(st.Host)
 			fmt.Fprintf(&b, `        ssl_certificate %s/fullchain.pem;
         ssl_certificate_key %s/privkey.pem;
         ssl_protocols TLSv1.2 TLSv1.3;
@@ -599,12 +599,30 @@ func tlbStrip(path string) string {
 	return "\n            rewrite ^" + regexp.QuoteMeta(path) + "/?(.*)$ /$1 break;"
 }
 
+// tlbLiveRoot 是 certbot 证书目录；platform 和 tlb 容器都只读挂载了同一个 letsencrypt 卷。测试里会改。
+var tlbLiveRoot = "/etc/letsencrypt/live"
+
 func tlbTLSDir() string {
 	name := strings.TrimSpace(os.Getenv("TLB_TLS_NAME"))
 	if name == "" {
 		return ""
 	}
-	return "/etc/letsencrypt/live/" + name
+	return tlbLiveRoot + "/" + name
+}
+
+// tlbSiteTLSDir 优先用站点第一个 host 自己的证书（live/<host>/fullchain.pem 存在时），
+// 否则回落到 TLB_TLS_NAME 的默认证书，保持旧行为。
+func tlbSiteTLSDir(host string) string {
+	if f := strings.Fields(host); len(f) > 0 {
+		h := strings.ToLower(strings.TrimSuffix(f[0], "."))
+		if h != "" && h != "_" && !strings.ContainsAny(h, "/*\\") && !strings.Contains(h, "..") {
+			dir := tlbLiveRoot + "/" + h
+			if _, err := os.Stat(filepath.Join(dir, "fullchain.pem")); err == nil {
+				return dir
+			}
+		}
+	}
+	return tlbTLSDir()
 }
 
 func tlbTLSOn() bool {

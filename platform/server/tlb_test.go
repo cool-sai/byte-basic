@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -122,5 +124,91 @@ func TestTlbZoneFromTLS(t *testing.T) {
 	}
 	if n != "order" || h != "order.lssl.work" {
 		t.Fatalf("got %s %s", n, h)
+	}
+}
+
+func writeTlbCert(t *testing.T, root, name string) {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"fullchain.pem", "privkey.pem"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func siteBlock(t *testing.T, conf, host string) string {
+	t.Helper()
+	i := strings.Index(conf, "server_name "+host+";")
+	if i < 0 {
+		t.Fatalf("missing server %s", host)
+	}
+	rest := conf[i:]
+	if j := strings.Index(rest[1:], "server_name "); j >= 0 {
+		rest = rest[:j+1]
+	}
+	return rest
+}
+
+func TestRenderTlbPerSiteCert(t *testing.T) {
+	root := t.TempDir()
+	old := tlbLiveRoot
+	tlbLiveRoot = root
+	t.Cleanup(func() { tlbLiveRoot = old })
+	t.Setenv("TLB_TLS_NAME", "lssl.work")
+	writeTlbCert(t, root, "lssl.work")
+	writeTlbCert(t, root, "news.lssl.work")
+
+	conf := renderTlbNginx([]tlbSiteFull{
+		{tlbSite: tlbSite{Host: "lssl.work www.lssl.work"}, routes: []tlbRoute{{Path: "/", Target: "home-web:80"}}},
+		{tlbSite: tlbSite{Host: "news.lssl.work"}, routes: []tlbRoute{{Path: "/", Target: "daily-news:80"}}},
+		{tlbSite: tlbSite{Host: "img.lssl.work"}, routes: []tlbRoute{{Path: "/", Target: "common-static:8092"}}},
+	})
+	cases := map[string]string{
+		"lssl.work www.lssl.work": root + "/lssl.work/",
+		"news.lssl.work":          root + "/news.lssl.work/",
+		"img.lssl.work":           root + "/lssl.work/", // 没有自己的证书，回落默认
+	}
+	for host, want := range cases {
+		blk := siteBlock(t, conf, host)
+		if !strings.Contains(blk, "ssl_certificate "+want+"fullchain.pem;") ||
+			!strings.Contains(blk, "ssl_certificate_key "+want+"privkey.pem;") {
+			t.Fatalf("%s: want cert %s, got\n%s", host, want, blk)
+		}
+	}
+	if !strings.Contains(conf, "listen 443 ssl default_server;") {
+		t.Fatal("first site should be 443 default_server")
+	}
+}
+
+func TestRenderTlbNoTLSWithoutDefaultCert(t *testing.T) {
+	root := t.TempDir()
+	old := tlbLiveRoot
+	tlbLiveRoot = root
+	t.Cleanup(func() { tlbLiveRoot = old })
+	t.Setenv("TLB_TLS_NAME", "lssl.work")
+	writeTlbCert(t, root, "news.lssl.work") // 只有站点证书、没有默认证书：保持旧行为，不开 TLS
+	conf := renderTlbNginx([]tlbSiteFull{
+		{tlbSite: tlbSite{Host: "news.lssl.work"}, routes: []tlbRoute{{Path: "/", Target: "daily-news:80"}}},
+	})
+	if strings.Contains(conf, "ssl_certificate") || strings.Contains(conf, "443") {
+		t.Fatal("TLS should stay off without default cert")
+	}
+}
+
+func TestTlbSiteTLSDirRejectsOddHosts(t *testing.T) {
+	root := t.TempDir()
+	old := tlbLiveRoot
+	tlbLiveRoot = root
+	t.Cleanup(func() { tlbLiveRoot = old })
+	t.Setenv("TLB_TLS_NAME", "lssl.work")
+	writeTlbCert(t, root, "lssl.work")
+	for _, h := range []string{"", "_", "../lssl.work", "*.lssl.work"} {
+		if got := tlbSiteTLSDir(h); got != root+"/lssl.work" {
+			t.Fatalf("%q -> %s", h, got)
+		}
 	}
 }
