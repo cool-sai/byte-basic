@@ -1,0 +1,26 @@
+# 证书签发/续期（http-01 webroot）。证书写入 letsencrypt 卷，挑战文件写入 tlb-acme 卷（tlb 80 端口提供）。
+# 环境变量放平台根目录的 .env（宿主机 /opt/byte-basic/.env）：CERT_DOMAINS=news.lssl.work，CERT_EMAIL 可选。
+services:
+  cert-renew:
+    build:
+      context: ../..
+      dockerfile: projects/cert-renew/Dockerfile
+    image: minikitex-cert-renew:local
+    hostname: cert-renew
+    command: ["python", "/app/renew.py"]
+    environment:
+      CERT_DOMAINS: ${CERT_DOMAINS:-}
+      CERT_EMAIL: ${CERT_EMAIL:-}
+      TLB_CONTAINER: golang-tlb-1
+      TZ: Asia/Shanghai
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - tlb-acme:/acme
+      - /var/run/docker.sock:/var/run/docker.sock   # 只用于 docker exec tlb nginx -s reload
+    restart: unless-stopped
+    pull_policy: never
+
+# 与主 docker-compose.yml 同名的卷；同一 compose 项目（golang）里即 golang_letsencrypt / golang_tlb-acme
+volumes:
+  letsencrypt:
+  tlb-acme:

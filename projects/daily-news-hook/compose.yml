@@ -1,5 +1,5 @@
 # GitHub push webhook 接收器。tlb 路由 news.lssl.work /_hook -> daily-news-hook:8080。
-# 密钥在 /work/.env 的 DAILY_NEWS_HOOK_SECRET；为空时本容器拒绝启动（不用 :?，避免拖垮平台其他 compose 命令）。
+# 密钥在平台根目录的 .env（宿主机 /opt/byte-basic/.env） 的 DAILY_NEWS_HOOK_SECRET；为空时本容器拒绝启动（不用 :?，避免拖垮平台其他 compose 命令）。
 services:
   daily-news-hook:
     build:
@@ -13,7 +13,7 @@ services:
       DAILY_NEWS_DIR: /srv/daily-news
       TZ: Asia/Shanghai
     volumes:
-      - /srv:/srv   # 挂父目录：首次 clone 需在 /srv 下建临时目录再 mv
+      - /srv/daily-news:/srv/daily-news   # 原地 git init/fetch，与 daily-news 容器共用同一目录
     expose:
       - "8080"
     restart: unless-stopped

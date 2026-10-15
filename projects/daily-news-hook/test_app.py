@@ -121,5 +121,32 @@ class TestHTTP(unittest.TestCase):
         self.assertTrue(self.pulled.wait(2), "pull not triggered")
 
 
+class TestGitPull(unittest.TestCase):
+    """用本地临时仓库模拟 GitHub，验证空目录首次拉取与原地更新（目录 inode 不变）。"""
+
+    def test_clone_into_empty_dir_then_update(self):
+        import os, subprocess, tempfile
+        tmp = tempfile.mkdtemp()
+        src, dst = os.path.join(tmp, "src"), os.path.join(tmp, "dst")
+        g = lambda *a: subprocess.run(["git", "-C", src, *a], check=True, capture_output=True)
+        os.makedirs(src)
+        g("init", "-q", "-b", "main")
+        g("config", "user.email", "t@t"); g("config", "user.name", "t")
+        open(os.path.join(src, "index.html"), "w").write("v1")
+        g("add", "."); g("commit", "-qm", "v1")
+        os.makedirs(dst)  # 已存在的空目录（模拟宿主机挂载点）
+        ino = os.stat(dst).st_ino
+        url = "file://" + src
+        self.assertTrue(app.git_pull(dst, url, "main"))
+        self.assertEqual(open(os.path.join(dst, "index.html")).read(), "v1")
+        open(os.path.join(src, "index.html"), "w").write("v2")
+        g("commit", "-qam", "v2")
+        self.assertTrue(app.git_pull(dst, url, "main"))
+        self.assertEqual(open(os.path.join(dst, "index.html")).read(), "v2")
+        self.assertEqual(os.stat(dst).st_ino, ino, "must update in place")
+        self.assertFalse(app.git_pull(dst, "file:///nonexistent", "main", tries=1))
+        self.assertEqual(open(os.path.join(dst, "index.html")).read(), "v2", "keep old content on failure")
+
+
 if __name__ == "__main__":
     unittest.main()

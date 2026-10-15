@@ -1,4 +1,5 @@
-"""daily-news-hook：接收 GitHub push webhook，推送到 cool-sai/daily-news 的 main 分支后立即拉取内容。
+"""daily-news-hook：接收 GitHub push webhook，推送到 cool-sai/daily-news 的 main 分支后立即拉取内容；
+启动时若内容目录为空，会自动做首次拉取。
 
 只用标准库。tlb 路由 path 为 /_hook，会去掉前缀，所以上游收到 /github、/health；
 直连调试时 /_hook/github、/_hook/health 也接受。
@@ -11,6 +12,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MAX_BODY = 1 << 20  # 1MB，晨报仓库的 push payload 远小于这个
@@ -125,6 +127,45 @@ def make_handler(secret: bytes, repo: str, ref: str, puller: Puller):
     return Handler
 
 
+def git_pull(dir_: str, url: str, branch: str, tries: int = 3) -> bool:
+    """把 url 的 branch 浅拉到 dir_，原地更新（不换目录，daily-news 容器的绑定挂载才能看到新内容）。
+
+    目录为空或不是 git 仓库时会原地 git init，相当于首次 clone。失败时保留旧内容。
+    """
+    def git(*args, check=True):
+        return subprocess.run(["git", "-C", dir_, *args], check=check, timeout=120,
+                              capture_output=True, text=True).stdout.strip()
+
+    os.makedirs(dir_, exist_ok=True)
+    if not os.path.isdir(os.path.join(dir_, ".git")):
+        log.info("init %s from %s", dir_, url)
+        git("init", "-q")
+    git("remote", "remove", "origin", check=False)
+    git("remote", "add", "origin", url)
+    old = git("rev-parse", "--short", "HEAD", check=False) or "none"
+    for i in range(1, tries + 1):
+        try:
+            git("fetch", "-q", "--depth", "1", "origin", branch)
+            break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            log.warning("fetch %d/%d failed: %s", i, tries, getattr(e, "stderr", "") or e)
+            if i == tries:
+                log.error("fetch failed, keep %s", old)
+                return False
+            time.sleep(i * 10)
+    git("reset", "-q", "--hard", "FETCH_HEAD")
+    git("clean", "-fdq")
+    new = git("rev-parse", "--short", "HEAD")
+    if new != old:
+        log.info("updated %s -> %s", old, new)
+        # 浅仓库回收旧对象，避免 .git 越积越大
+        git("reflog", "expire", "--expire=now", "--all", check=False)
+        git("gc", "-q", "--prune=now", check=False)
+    else:
+        log.info("already at %s", new)
+    return True
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     secret = os.environ.get("DAILY_NEWS_HOOK_SECRET", "").strip()
@@ -132,16 +173,18 @@ def main():
         log.error("DAILY_NEWS_HOOK_SECRET is empty, refuse to start")
         sys.exit(1)
     repo = os.environ.get("DAILY_NEWS_HOOK_REPO", "cool-sai/daily-news")
-    ref = "refs/heads/" + os.environ.get("DAILY_NEWS_BRANCH", "main")
-    script = os.environ.get("DAILY_NEWS_PULL_CMD", "/usr/local/bin/daily-news-pull.sh")
+    branch = os.environ.get("DAILY_NEWS_BRANCH", "main")
+    ref = "refs/heads/" + branch
+    dir_ = os.environ.get("DAILY_NEWS_DIR", "/srv/daily-news")
+    url = os.environ.get("DAILY_NEWS_REPO_URL", f"https://github.com/{repo}.git")
 
-    def run_pull():
-        r = subprocess.run([script], timeout=600)  # 输出直接进容器日志
-        log.info("pull %s (exit %d)", "done" if r.returncode == 0 else "failed", r.returncode)
+    puller = Puller(lambda: git_pull(dir_, url, branch))
+    if not os.path.isdir(os.path.join(dir_, ".git")):
+        puller.trigger()  # 空目录或不是仓库：启动时自动首次拉取（后台进行，不耽误监听）
 
     port = int(os.environ.get("DAILY_NEWS_HOOK_PORT", "8080"))
-    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(secret.encode(), repo, ref, Puller(run_pull)))
-    log.info("daily-news-hook listening on :%d, repo=%s ref=%s", port, repo, ref)
+    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(secret.encode(), repo, ref, puller))
+    log.info("daily-news-hook listening on :%d, repo=%s ref=%s dir=%s", port, repo, ref, dir_)
     server.serve_forever()
 
 
