@@ -4,14 +4,15 @@
 
 ## 1. 数据模型
 
-一张通用节点表，四种类型，层级固定：
+一张通用节点表，三种类型，两级（module → detail），层级固定：
 
 ```
 module（模块，如 finance）
-└── list（列表，如 runs）
-    └── detail（详情，如 2026-10-16-r19）
-        └── block（区块，如 triggers），data 为任意 JSON
+└── detail（详情，如 digest-30-evening）
+    └── block（区块，如 conclusion），data 为任意 JSON
 ```
+
+旧版的 list 层（module → list → detail）已删除。board 启动时 `flattenLists` 会把历史数据里 list 下的 detail 改挂到 module 下，再软删除空的 list（幂等；同名冲突的 detail 跳过并打日志，该 list 保留待人工处理）。模块名 `modules` 是保留字。
 
 `board_node`
 
@@ -19,7 +20,7 @@ module（模块，如 finance）
 |---|---|
 | id | 自增主键 |
 | parent_id | 父节点 id，module 为 0 |
-| type | module / list / detail / block |
+| type | module / detail / block |
 | slug | 同一父节点下唯一（`uk_parent_slug`），小写字母数字 `. _ -` |
 | title | 展示标题 |
 | data | JSON，任意结构；页面按结构自适应 |
@@ -42,20 +43,19 @@ module（模块，如 finance）
 
 | 接口 | 返回 |
 |---|---|
-| `GET /board/api/v2/modules?page=&size=` | 模块分页 |
-| `GET /board/api/v2/modules/{slug}/lists?page=&size=` | `{module, lists}` |
-| `GET /board/api/v2/lists/{id}/details?page=&size=` | `{list, details}`，新到旧，size 默认 20、最大 100 |
-| `GET /board/api/v2/details/{id}` | `{detail, blocks}`；blocks 只有清单（id/slug/title/schema_version），不含 data，便于页面按需懒加载 |
-| `GET /board/api/v2/details/{id}?include=data` | 同上，但每个区块都带 data，一次请求拿全（服务端每 100 个区块一条查询，无 N+1；最多 1000 个区块）。`include` 只认 `data`，其他值按默认处理 |
-| `GET /board/api/v2/details/{id}/blocks/{slug}` | 单个区块，含 data |
+| `GET /board/api/v2/modules?page=&size=` | 模块分页（首页导航用） |
+| `GET /board/api/v2/{module}?page=&size=` | `{module, details}`，模块下的详情，新到旧，size 默认 20、最大 100，不含区块 |
+| `GET /board/api/v2/{module}/{slug}` | `{detail, blocks}`；blocks 只有清单，不含 data |
+| `GET /board/api/v2/{module}/{slug}?include=data` | 同上，但每个区块都带 data，一次拿全（每 100 个区块一条查询，最多 1000 个）。`include` 只认 `data` |
+| `GET /board/api/v2/{module}/{slug}/blocks/{block}` | 单个区块，含 data |
 
-id 类型不对（比如拿 list 的 id 查 details/{id}）、节点已删除或不存在，一律 404。
+全部按名字（slug），不用数字 id。不存在、已删除、路径不对，一律 JSON 404（以前错路径会因为 `OPTIONS /api/v2/` 兜底变成 405）。
 
 ## 3. MCP 写工具（`https://lssl.work/board/mcp`，Bearer token）
 
 | 工具 | 作用 |
 |---|---|
-| `put_node(parent_id, type, slug, title, data, schema_version)` | 按 parent_id+slug 幂等创建/覆盖，已删除的会复活，返回节点（含 id） |
+| `put_node(type, slug, parent_id? 或 module/detail, title, data, schema_version)` | 按 父节点+slug 幂等创建/覆盖，已删除的会复活，返回节点（含 id）。父节点可用 `parent_id`，或按名字：detail 填 `module`，block 填 `module`+`detail` |
 | `update_node(id, title?, data?, schema_version?)` | 只改传入的字段，data 整体替换 |
 | `delete_node(id)` | 软删除整棵子树，返回删除数量 |
 | `get_node(id)` / `list_nodes(parent_id, type, page, page_size)` | 读 |
@@ -63,7 +63,7 @@ id 类型不对（比如拿 list 的 id 查 details/{id}）、节点已删除或
 | `list_page_versions(path)` | 历史版本，新到旧，标出 current |
 | `rollback_page(path, version)` | current 指针切回旧版本 |
 
-典型写法：`put_node(type=module, slug=finance)` → 拿 id 建 `list runs` → 每次运行建一个 detail → 每块数据一个 block。
+典型写法：`put_node(type=module, slug=finance)` → `put_node(type=detail, module=finance, slug=digest-30-evening, data={…})` → `put_node(type=block, module=finance, detail=digest-30-evening, slug=conclusion, data={…})`。
 
 ## 4. 页面托管
 

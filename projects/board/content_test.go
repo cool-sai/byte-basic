@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -24,11 +23,10 @@ func mustPut(t *testing.T, c ContentStore, in NodeInput) Node {
 	return n
 }
 
-// seedTree 建一棵 finance/runs/r1/{triggers,funds}。
-func seedTree(t *testing.T, c ContentStore) (mod, list, det Node) {
+// seedTree 建一棵 finance/r19/{triggers,funds}。
+func seedTree(t *testing.T, c ContentStore) (mod, det Node) {
 	mod = mustPut(t, c, NodeInput{Type: NodeModule, Slug: "finance", Title: "理财"})
-	list = mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeList, Slug: "runs", Title: "每日运行"})
-	det = mustPut(t, c, NodeInput{ParentID: list.ID, Type: NodeDetail, Slug: "2026-10-16-r19", Data: json.RawMessage(`{"run_id":19}`)})
+	det = mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeDetail, Slug: "2026-10-16-r19", Data: json.RawMessage(`{"run_id":19}`)})
 	mustPut(t, c, NodeInput{ParentID: det.ID, Type: NodeBlock, Slug: "triggers", Data: json.RawMessage(`{"hs300":17.2}`), SchemaVersion: 2})
 	mustPut(t, c, NodeInput{ParentID: det.ID, Type: NodeBlock, Slug: "funds", Data: json.RawMessage(`[1,2]`)})
 	return
@@ -36,16 +34,19 @@ func seedTree(t *testing.T, c ContentStore) (mod, list, det Node) {
 
 func TestNodeHierarchyRules(t *testing.T) {
 	c := newMemContent()
-	mod, list, det := seedTree(t, c)
+	mod, det := seedTree(t, c)
 	bad := []NodeInput{
-		{Type: NodeList, Slug: "x"},                         // list 不能挂根
-		{ParentID: mod.ID, Type: NodeModule, Slug: "x"},     // module 不能有父
-		{ParentID: mod.ID, Type: NodeDetail, Slug: "x"},     // detail 父必须是 list
-		{ParentID: list.ID, Type: NodeBlock, Slug: "x"},     // block 父必须是 detail
+		{Type: "list", Slug: "x"}, // list 层已删除
+		{ParentID: mod.ID, Type: "list", Slug: "x"},
+		{ParentID: mod.ID, Type: NodeModule, Slug: "x"}, // module 不能有父
+		{Type: NodeDetail, Slug: "x"},                   // detail 必须有父（module）
+		{Type: NodeModule, Slug: "modules"},             // 保留模块名
+		{ParentID: mod.ID, Type: NodeBlock, Slug: "x"},      // block 父必须是 detail
+		{ParentID: det.ID, Type: NodeDetail, Slug: "x"},     // detail 父必须是 module
 		{ParentID: det.ID, Type: "page", Slug: "x"},         // 未知类型
 		{Type: NodeModule, Slug: "Bad Slug"},                // slug 非法
 		{Type: NodeModule, Slug: "m", Data: []byte(`{bad`)}, // 非法 JSON
-		{ParentID: 9999, Type: NodeList, Slug: "x"},         // 父不存在
+		{ParentID: 9999, Type: NodeDetail, Slug: "x"},       // 父不存在
 		{Type: NodeModule, Slug: "m2", SchemaVersion: -1},
 	}
 	for _, in := range bad {
@@ -57,27 +58,24 @@ func TestNodeHierarchyRules(t *testing.T) {
 
 func TestPutNodeUpsertAndSoftDeleteSubtree(t *testing.T) {
 	c := newMemContent()
-	mod, list, det := seedTree(t, c)
-	again := mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeList, Slug: "runs", Title: "运行记录"})
-	if again.ID != list.ID || again.Title != "运行记录" {
+	mod, det := seedTree(t, c)
+	again := mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeDetail, Slug: "2026-10-16-r19", Title: "运行记录"})
+	if again.ID != det.ID || again.Title != "运行记录" {
 		t.Fatalf("upsert should keep id: %+v", again)
 	}
-	n, err := c.DeleteNode(list.ID)
-	if err != nil || n != 4 { // list + detail + 2 blocks
+	n, err := c.DeleteNode(det.ID)
+	if err != nil || n != 3 { // detail + 2 blocks
 		t.Fatalf("delete count %d err %v", n, err)
 	}
-	if _, err := c.GetNode(det.ID); err != errNotFound {
-		t.Fatalf("detail should be gone: %v", err)
+	if p, _ := c.ListChildren(mod.ID, NodeDetail, 1, 20); p.Total != 0 {
+		t.Fatalf("details left: %+v", p)
 	}
-	if p, _ := c.ListChildren(mod.ID, NodeList, 1, 20); p.Total != 0 {
-		t.Fatalf("lists left: %+v", p)
-	}
-	if _, err := c.DeleteNode(list.ID); err != errNotFound {
+	if _, err := c.DeleteNode(det.ID); err != errNotFound {
 		t.Fatalf("double delete: %v", err)
 	}
 	// 复活：同 parent+slug 再 put
-	back := mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeList, Slug: "runs"})
-	if back.ID != list.ID {
+	back := mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeDetail, Slug: "2026-10-16-r19"})
+	if back.ID != det.ID {
 		t.Fatalf("revive should reuse id")
 	}
 	title := "新"
@@ -90,19 +88,19 @@ func TestPutNodeUpsertAndSoftDeleteSubtree(t *testing.T) {
 
 func TestListChildrenPaging(t *testing.T) {
 	c := newMemContent()
-	_, list, _ := seedTree(t, c)
+	mod, _ := seedTree(t, c)
 	for i := 0; i < 25; i++ {
-		mustPut(t, c, NodeInput{ParentID: list.ID, Type: NodeDetail, Slug: "d" + string(rune('a'+i))})
+		mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeDetail, Slug: "d" + string(rune('a'+i))})
 	}
-	p, _ := c.ListChildren(list.ID, NodeDetail, 2, 10)
+	p, _ := c.ListChildren(mod.ID, NodeDetail, 2, 10)
 	if p.Total != 26 || len(p.Items) != 10 || p.Page != 2 {
 		t.Fatalf("page %+v", p)
 	}
-	p, _ = c.ListChildren(list.ID, NodeDetail, 1, 500)
+	p, _ = c.ListChildren(mod.ID, NodeDetail, 1, 500)
 	if p.PageSize != 100 {
 		t.Fatalf("size cap %d", p.PageSize)
 	}
-	if first, _ := c.ListChildren(list.ID, NodeDetail, 1, 1); first.Items[0].Slug != "dy" {
+	if first, _ := c.ListChildren(mod.ID, NodeDetail, 1, 1); first.Items[0].Slug != "dy" {
 		t.Fatalf("newest first, got %s", first.Items[0].Slug)
 	}
 }
@@ -184,27 +182,17 @@ func getJSON(t *testing.T, url string, out any) *http.Response {
 
 func TestReadAPI(t *testing.T) {
 	srv, c := contentServer(t, contentConfig{})
-	_, list, det := seedTree(t, c)
+	_, det := seedTree(t, c)
 	var mods NodePage
 	res := getJSON(t, srv.URL+"/api/v2/modules", &mods)
 	if res.Header.Get("Access-Control-Allow-Origin") != "*" || mods.Total != 1 || mods.Items[0].Slug != "finance" {
 		t.Fatalf("modules %+v %v", mods, res.Header)
 	}
-	var lists struct{ Lists NodePage }
-	getJSON(t, srv.URL+"/api/v2/modules/finance/lists", &lists)
-	if lists.Lists.Total != 1 || lists.Lists.Items[0].ID != list.ID {
-		t.Fatalf("lists %+v", lists)
-	}
-	var dets struct{ Details NodePage }
-	getJSON(t, srv.URL+"/api/v2/lists/"+itoa(list.ID)+"/details?page=1&size=5", &dets)
-	if dets.Details.Total != 1 || dets.Details.PageSize != 5 {
-		t.Fatalf("details %+v", dets)
-	}
 	var detail struct {
 		Detail Node
 		Blocks []map[string]any
 	}
-	getJSON(t, srv.URL+"/api/v2/details/"+itoa(det.ID), &detail)
+	getJSON(t, srv.URL+"/api/v2/finance/"+det.Slug, &detail)
 	if len(detail.Blocks) != 2 {
 		t.Fatalf("blocks %+v", detail)
 	}
@@ -214,13 +202,14 @@ func TestReadAPI(t *testing.T) {
 		}
 	}
 	var blk Node
-	getJSON(t, srv.URL+"/api/v2/details/"+itoa(det.ID)+"/blocks/triggers", &blk)
+	getJSON(t, srv.URL+"/api/v2/finance/"+det.Slug+"/blocks/triggers", &blk)
 	if string(blk.Data) != `{"hs300":17.2}` || blk.SchemaVersion != 2 {
 		t.Fatalf("block %+v", blk)
 	}
-	// 类型不符、不存在、写方法 都不行
-	for _, u := range []string{"/api/v2/details/" + itoa(list.ID), "/api/v2/lists/" + itoa(det.ID) + "/details", "/api/v2/modules/nope/lists", "/api/v2/details/abc"} {
-		if res := getJSON(t, srv.URL+u, nil); res.StatusCode != 404 && res.StatusCode != 400 {
+	// 旧的 list 层接口与按 id 的接口都已删除
+	for _, u := range []string{"/api/v2/modules/finance/lists", "/api/v2/lists/1/details", "/api/v2/details/" + itoa(det.ID),
+		"/api/v2/details/" + itoa(det.ID) + "/blocks/triggers"} {
+		if res := getJSON(t, srv.URL+u, nil); res.StatusCode != 404 {
 			t.Fatalf("%s -> %d", u, res.StatusCode)
 		}
 	}
@@ -337,8 +326,7 @@ func TestContentMCPTools(t *testing.T) {
 		return out
 	}
 	mod := call("put_node", map[string]any{"type": "module", "slug": "news", "title": "新闻"})
-	lst := call("put_node", map[string]any{"parent_id": mod["id"], "type": "list", "slug": "days"})
-	det := call("put_node", map[string]any{"parent_id": lst["id"], "type": "detail", "slug": "2026-10-16", "data": map[string]any{"n": 3}})
+	det := call("put_node", map[string]any{"parent_id": mod["id"], "type": "detail", "slug": "2026-10-16", "data": map[string]any{"n": 3}})
 	call("put_node", map[string]any{"parent_id": det["id"], "type": "block", "slug": "top", "data": []any{"a", "b"}, "schema_version": 2})
 	if p := call("list_nodes", map[string]any{"parent_id": det["id"], "type": "block"}); p["total"].(float64) != 1 {
 		t.Fatalf("list_nodes %v", p)
@@ -346,7 +334,13 @@ func TestContentMCPTools(t *testing.T) {
 	if u := call("update_node", map[string]any{"id": det["id"], "title": "周五"}); u["title"] != "周五" {
 		t.Fatalf("update %v", u)
 	}
-	if d := call("delete_node", map[string]any{"id": lst["id"]}); d["deleted"].(float64) != 3 {
+	// 按名字写：module 填模块 slug，block 再加 detail 填详情 slug，不用查 id
+	d2 := call("put_node", map[string]any{"module": "news", "type": "detail", "slug": "2026-10-17"})
+	b2 := call("put_node", map[string]any{"module": "news", "detail": "2026-10-17", "type": "block", "slug": "top"})
+	if d2["parent_id"] != mod["id"] || b2["parent_id"] != d2["id"] {
+		t.Fatalf("named put %v %v", d2, b2)
+	}
+	if d := call("delete_node", map[string]any{"id": det["id"]}); d["deleted"].(float64) != 2 {
 		t.Fatalf("delete %v", d)
 	}
 	call("put_page", map[string]any{"path": "news/today", "files": map[string]any{"index.html": "a"}})
@@ -360,7 +354,7 @@ func TestContentMCPTools(t *testing.T) {
 
 func TestDetailIncludeData(t *testing.T) {
 	srv, c := contentServer(t, contentConfig{})
-	_, _, det := seedTree(t, c)
+	_, det := seedTree(t, c)
 	type resp struct {
 		Blocks []Node `json:"blocks"`
 	}
@@ -369,7 +363,7 @@ func TestDetailIncludeData(t *testing.T) {
 		data bool
 	}{{"", false}, {"?include=data", true}, {"?include=other", false}} {
 		var out resp
-		if res := getJSON(t, srv.URL+"/api/v2/details/"+strconv.FormatInt(det.ID, 10)+tc.q, &out); res.StatusCode != 200 {
+		if res := getJSON(t, srv.URL+"/api/v2/finance/"+det.Slug+tc.q, &out); res.StatusCode != 200 {
 			t.Fatalf("%s -> %d", tc.q, res.StatusCode)
 		}
 		if len(out.Blocks) != 2 {
@@ -385,5 +379,99 @@ func TestDetailIncludeData(t *testing.T) {
 		if !tc.data && (got["triggers"] != "" || got["funds"] != "") {
 			t.Fatalf("%s should omit data: %v", tc.q, got)
 		}
+	}
+}
+
+func TestTwoLevelNamedRoutes(t *testing.T) {
+	srv, c := contentServer(t, contentConfig{})
+	mod := mustPut(t, c, NodeInput{Type: NodeModule, Slug: "finance", Title: "理财"})
+	det := mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeDetail, Slug: "digest-30-evening", Data: json.RawMessage(`{"run_id":30}`)})
+	mustPut(t, c, NodeInput{ParentID: det.ID, Type: NodeBlock, Slug: "conclusion", Data: json.RawMessage(`{"text":"不动"}`)})
+
+	var list struct {
+		Module  Node
+		Details NodePage
+	}
+	if r := getJSON(t, srv.URL+"/api/v2/finance?size=5", &list); r.StatusCode != 200 || list.Module.ID != mod.ID || list.Details.Total != 1 || list.Details.PageSize != 5 {
+		t.Fatalf("module details %d %+v", r.StatusCode, list)
+	}
+	if r := getJSON(t, srv.URL+"/api/v2/finance", nil); r.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatal("cors")
+	}
+	var one struct {
+		Detail Node
+		Blocks []Node
+	}
+	getJSON(t, srv.URL+"/api/v2/finance/digest-30-evening?include=data", &one)
+	if one.Detail.ID != det.ID || len(one.Blocks) != 1 || string(one.Blocks[0].Data) != `{"text":"不动"}` {
+		t.Fatalf("detail %+v", one)
+	}
+	var b Node
+	if r := getJSON(t, srv.URL+"/api/v2/finance/digest-30-evening/blocks/conclusion", &b); r.StatusCode != 200 || b.Slug != "conclusion" {
+		t.Fatalf("block %d %+v", r.StatusCode, b)
+	}
+	// 字面路由不被 {module} 抢走
+	var mods NodePage
+	if getJSON(t, srv.URL+"/api/v2/modules", &mods); mods.Total != 1 {
+		t.Fatalf("modules %+v", mods)
+	}
+	for _, u := range []string{"/api/v2/nope", "/api/v2/finance/nope", "/api/v2/finance/digest-30-evening/blocks/nope",
+		"/api/v2/finance/digest-30-evening/blocks", "/api/v2/a/b/c/d/e"} {
+		if r := getJSON(t, srv.URL+u, nil); r.StatusCode != 404 {
+			t.Fatalf("%s -> %d (want 404, not 405)", u, r.StatusCode)
+		}
+	}
+}
+
+// legacyNode 直接往内存库塞一条旧版 list 节点（新代码的 PutNode 已不接受 list）。
+func legacyNode(c *memContent, parent int64, slug string) Node {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nextID++
+	n := &memNode{Node: Node{ID: c.nextID, ParentID: parent, Type: legacyList, Slug: slug, Data: json.RawMessage(`{}`), SchemaVersion: 1}, seq: c.nextID}
+	c.nodes[n.ID] = n
+	return n.Node
+}
+
+func TestFlattenListsMigration(t *testing.T) {
+	c := newMemContent()
+	mod := mustPut(t, c, NodeInput{Type: NodeModule, Slug: "news"})
+	lst := legacyNode(c, mod.ID, "daily")
+	var ids []int64
+	for _, s := range []string{"2026-10-15", "2026-10-16"} {
+		d := mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeDetail, Slug: s})
+		mustPut(t, c, NodeInput{ParentID: d.ID, Type: NodeBlock, Slug: "top"})
+		if err := c.MoveNode(d.ID, lst.ID); err != nil { // 造旧数据：detail 挂在 list 下
+			t.Fatal(err)
+		}
+		ids = append(ids, d.ID)
+	}
+	// 第二个模块：有同名冲突，list 应保留
+	mod2 := mustPut(t, c, NodeInput{Type: NodeModule, Slug: "finance"})
+	lst2 := legacyNode(c, mod2.ID, "digest")
+	clash := mustPut(t, c, NodeInput{ParentID: mod2.ID, Type: NodeDetail, Slug: "x"})
+	_ = clash
+	d3 := mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeDetail, Slug: "x"})
+	if err := c.MoveNode(d3.ID, lst2.ID); err != nil {
+		t.Fatal(err)
+	}
+	moved, skipped, err := flattenLists(c)
+	if err != nil || moved != 2 || skipped != 1 {
+		t.Fatalf("moved %d skipped %d err %v", moved, skipped, err)
+	}
+	if d, _ := c.GetNode(ids[0]); d.ParentID != mod.ID {
+		t.Fatalf("not moved %+v", d)
+	}
+	if p, _ := c.ListChildren(ids[0], NodeBlock, 1, 10); p.Total != 1 {
+		t.Fatal("blocks must follow detail")
+	}
+	if _, err := c.GetNode(lst.ID); err != errNotFound {
+		t.Fatal("empty list should be soft-deleted")
+	}
+	if _, err := c.GetNode(lst2.ID); err != nil {
+		t.Fatal("list with conflicts must stay")
+	}
+	if moved, skipped, _ := flattenLists(c); moved != 0 || skipped != 1 {
+		t.Fatalf("not idempotent: %d %d", moved, skipped)
 	}
 }

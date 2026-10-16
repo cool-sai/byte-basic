@@ -65,6 +65,9 @@ func (s *memContent) PutNode(in NodeInput) (Node, error) {
 		}
 		parent = &p.Node
 	}
+	if err := checkModuleSlug(in.Type, slug); err != nil {
+		return Node{}, err
+	}
 	if err := checkParent(in.Type, parent); err != nil {
 		return Node{}, err
 	}
@@ -257,4 +260,23 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func (s *memContent) MoveNode(id, parentID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, err := s.liveLocked(id)
+	if err != nil {
+		return err
+	}
+	if n.ParentID == parentID {
+		return nil
+	}
+	for _, o := range s.nodes { // 与 MySQL uk_parent_slug 一致：软删除的也占名
+		if o.ParentID == parentID && o.Slug == n.Slug {
+			return errConflict
+		}
+	}
+	n.ParentID = parentID
+	return nil
 }

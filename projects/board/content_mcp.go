@@ -9,9 +9,11 @@ import (
 )
 
 type putNodeArgs struct {
-	ParentID      int64  `json:"parent_id,omitempty" jsonschema:"父节点 id；module 填 0 或不填"`
-	Type          string `json:"type" jsonschema:"module / list / detail / block；层级固定 module→list→detail→block"`
-	Slug          string `json:"slug" jsonschema:"同一父节点下唯一的短名，小写字母数字 . _ -，如 finance、runs、2026-10-16-r19、triggers"`
+	ParentID      int64  `json:"parent_id,omitempty" jsonschema:"父节点 id；module 填 0 或不填；也可以不填 id、改用 module/detail 按名字指定"`
+	Module        string `json:"module,omitempty" jsonschema:"按名字指定父节点：写 detail 时填所属模块 slug（如 finance）；写 block 时同时填 module 和 detail"`
+	Detail        string `json:"detail,omitempty" jsonschema:"写 block 时所属详情的 slug（需同时填 module）"`
+	Type          string `json:"type" jsonschema:"module / detail / block；层级固定 module→detail→block"`
+	Slug          string `json:"slug" jsonschema:"同一父节点下唯一的短名，小写字母数字 . _ -，如 finance、digest-30-evening、triggers；模块名不能用 modules"`
 	Title         string `json:"title,omitempty" jsonschema:"展示标题"`
 	Data          any    `json:"data,omitempty" jsonschema:"任意 JSON；页面按结构自适应展示"`
 	SchemaVersion int    `json:"schema_version,omitempty" jsonschema:"data 的结构版本，默认 1；改了结构就加 1"`
@@ -30,7 +32,7 @@ type nodeIDArgs struct {
 
 type listNodesArgs struct {
 	ParentID int64  `json:"parent_id,omitempty" jsonschema:"父节点 id，0 表示根（列模块）"`
-	Type     string `json:"type" jsonschema:"要列的子节点类型 module / list / detail / block"`
+	Type     string `json:"type" jsonschema:"要列的子节点类型 module / detail / block"`
 	Page     int    `json:"page,omitempty" jsonschema:"页码，从 1 开始"`
 	PageSize int    `json:"page_size,omitempty" jsonschema:"每页条数，默认 20，最大 100"`
 }
@@ -51,9 +53,9 @@ type rollbackPageArgs struct {
 
 const contentInstructions = `
 
-内容树（v2）：module（模块，如 finance）→ list（列表，如 runs）→ detail（详情，如某次运行）→ block（区块，如 triggers）。每个节点的 data 是任意 JSON，带 schema_version。
-写：put_node（按 parent_id+slug 幂等覆盖，返回 id）、update_node、delete_node（软删除整棵子树）、list_nodes、get_node。
-读接口（公开、只读，页面 JS 用）：/board/api/v2/modules、/modules/{slug}/lists、/lists/{id}/details?page=&size=、/details/{id}（含区块清单，不含 data）、/details/{id}/blocks/{slug}。
+内容树（v2，两级）：module（模块，如 finance）→ detail（详情，如一次推送）→ block（区块，如 conclusion）。每个节点的 data 是任意 JSON，带 schema_version。
+写：put_node（按 父节点+slug 幂等覆盖，返回 id；父节点可用 parent_id，或按名字 module / module+detail）、update_node、delete_node（软删除整棵子树）、list_nodes、get_node。
+读接口（公开、只读，页面 JS 用，全部按名字）：/board/api/v2/modules（全部模块）、/{module}?page=&size=（模块下的详情，不含区块）、/{module}/{slug}?include=data（详情 + 全部区块，一次拿全）、/{module}/{slug}/blocks/{block}（单个区块）。
 页面：put_page 上传 HTML/JS/CSS（每次一个新版本并立即上线），list_page_versions 看历史，rollback_page 切回旧版本。页面只能 fetch 上面的读接口，不能调写接口、不能嵌 iframe、不能提交表单。`
 
 func addContentTools(server *mcp.Server, c ContentStore) {
@@ -64,6 +66,13 @@ func addContentTools(server *mcp.Server, c ContentStore) {
 		data, err := anyJSON(in.Data)
 		if err != nil {
 			return nil, nil, err
+		}
+		if in.ParentID == 0 && in.Module != "" {
+			pid, err := resolveNamedParent(c, in.Module, in.Detail)
+			if err != nil {
+				return nil, nil, err
+			}
+			in.ParentID = pid
 		}
 		n, err := c.PutNode(NodeInput{ParentID: in.ParentID, Type: in.Type, Slug: in.Slug, Title: in.Title, Data: data, SchemaVersion: in.SchemaVersion})
 		if err != nil {
@@ -114,7 +123,7 @@ func addContentTools(server *mcp.Server, c ContentStore) {
 		Description: "分页列出某父节点下某类型的子节点，新到旧",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in listNodesArgs) (*mcp.CallToolResult, any, error) {
 		if _, ok := parentType[in.Type]; !ok {
-			return nil, nil, fmt.Errorf("type 只能是 module/list/detail/block")
+			return nil, nil, fmt.Errorf("type 只能是 module/detail/block")
 		}
 		p, err := c.ListChildren(in.ParentID, in.Type, in.Page, in.PageSize)
 		if err != nil {
@@ -163,4 +172,20 @@ func anyJSON(v any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("data 无法序列化: %w", err)
 	}
 	return b, nil
+}
+
+// resolveNamedParent：按名字找父节点。只给 module → 模块本身；再给 detail → 该模块下的详情。
+func resolveNamedParent(c ContentStore, module, detail string) (int64, error) {
+	m, err := c.FindChild(0, NodeModule, module)
+	if err != nil {
+		return 0, fmt.Errorf("模块 %q 不存在", module)
+	}
+	if detail == "" {
+		return m.ID, nil
+	}
+	d, err := c.FindChild(m.ID, NodeDetail, detail)
+	if err != nil {
+		return 0, fmt.Errorf("模块 %q 下没有详情 %q", module, detail)
+	}
+	return d.ID, nil
 }

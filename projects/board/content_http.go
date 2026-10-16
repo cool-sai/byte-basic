@@ -118,70 +118,45 @@ func registerContentRoutes(mux *http.ServeMux, c ContentStore, cfg contentConfig
 		}
 		writeJSON(w, http.StatusOK, p)
 	}))
-	mux.HandleFunc("GET /api/v2/modules/{slug}/lists", readCORS(func(w http.ResponseWriter, r *http.Request) {
-		m, err := c.FindChild(0, NodeModule, r.PathValue("slug"))
+
+	// 两级：/api/v2/{module}、/api/v2/{module}/{slug}、/api/v2/{module}/{slug}/blocks/{block}（按名字，不用 id）。
+	// 字面路由 /api/v2/modules 更具体，优先匹配；modules 已被 reservedModuleSlugs 保留。
+	mux.HandleFunc("GET /api/v2/{module}", readCORS(func(w http.ResponseWriter, r *http.Request) {
+		m, err := c.FindChild(0, NodeModule, r.PathValue("module"))
 		if err != nil {
 			writeStoreErr(w, err)
 			return
 		}
 		page, size := queryPage(r)
-		p, err := c.ListChildren(m.ID, NodeList, page, size)
+		p, err := c.ListChildren(m.ID, NodeDetail, page, size)
 		if err != nil {
 			writeStoreErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"module": m, "lists": p})
+		writeJSON(w, http.StatusOK, map[string]any{"module": m, "details": p})
 	}))
-	mux.HandleFunc("GET /api/v2/lists/{id}/details", readCORS(func(w http.ResponseWriter, r *http.Request) {
-		l, ok := typedNode(w, r, c, NodeList)
+	mux.HandleFunc("GET /api/v2/{module}/{slug}", readCORS(func(w http.ResponseWriter, r *http.Request) {
+		d, ok := namedDetail(w, r, c)
 		if !ok {
 			return
 		}
-		page, size := queryPage(r)
-		p, err := c.ListChildren(l.ID, NodeDetail, page, size)
-		if err != nil {
-			writeStoreErr(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"list": l, "details": p})
+		writeDetail(w, r, c, d)
 	}))
-	mux.HandleFunc("GET /api/v2/details/{id}", readCORS(func(w http.ResponseWriter, r *http.Request) {
-		d, ok := typedNode(w, r, c, NodeDetail)
+	mux.HandleFunc("GET /api/v2/{module}/{slug}/blocks/{block}", readCORS(func(w http.ResponseWriter, r *http.Request) {
+		d, ok := namedDetail(w, r, c)
 		if !ok {
 			return
 		}
-		// include=data：区块连同 data 一次返回（ListChildren 本就是一条 SQL 批量取，无 N+1）；默认只给清单。
-		withData := r.URL.Query().Get("include") == "data"
-		blocks := []Node{}
-		for page := 1; page <= 10; page++ {
-			p, err := c.ListChildren(d.ID, NodeBlock, page, 100)
-			if err != nil {
-				writeStoreErr(w, err)
-				return
-			}
-			for _, b := range p.Items {
-				if !withData {
-					b = b.brief()
-				}
-				blocks = append(blocks, b)
-			}
-			if page*100 >= p.Total {
-				break
-			}
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"detail": d, "blocks": blocks})
-	}))
-	mux.HandleFunc("GET /api/v2/details/{id}/blocks/{slug}", readCORS(func(w http.ResponseWriter, r *http.Request) {
-		d, ok := typedNode(w, r, c, NodeDetail)
-		if !ok {
-			return
-		}
-		b, err := c.FindChild(d.ID, NodeBlock, r.PathValue("slug"))
+		b, err := c.FindChild(d.ID, NodeBlock, r.PathValue("block"))
 		if err != nil {
 			writeStoreErr(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, b)
+	}))
+	// 兜底：没匹配上的 GET 返回 JSON 404。之前只有 OPTIONS /api/v2/ 能匹配，错路径会变成 405（per-block 405 的根因）。
+	mux.HandleFunc("GET /api/v2/", readCORS(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}))
 
 	mux.HandleFunc("GET /pages/{rest...}", func(w http.ResponseWriter, r *http.Request) {
@@ -296,4 +271,40 @@ func servePage(w http.ResponseWriter, r *http.Request, c ContentStore, cfg conte
 		return
 	}
 	http.NotFound(w, r)
+}
+
+func namedDetail(w http.ResponseWriter, r *http.Request, c ContentStore) (Node, bool) {
+	m, err := c.FindChild(0, NodeModule, r.PathValue("module"))
+	if err == nil {
+		var d Node
+		d, err = c.FindChild(m.ID, NodeDetail, r.PathValue("slug"))
+		if err == nil {
+			return d, true
+		}
+	}
+	writeStoreErr(w, err)
+	return Node{}, false
+}
+
+// writeDetail：detail + 区块。include=data 时区块带 data（ListChildren 一条 SQL 批量取，无 N+1）；默认只给清单。
+func writeDetail(w http.ResponseWriter, r *http.Request, c ContentStore, d Node) {
+	withData := r.URL.Query().Get("include") == "data"
+	blocks := []Node{}
+	for page := 1; page <= 10; page++ {
+		p, err := c.ListChildren(d.ID, NodeBlock, page, 100)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		for _, b := range p.Items {
+			if !withData {
+				b = b.brief()
+			}
+			blocks = append(blocks, b)
+		}
+		if page*100 >= p.Total {
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"detail": d, "blocks": blocks})
 }

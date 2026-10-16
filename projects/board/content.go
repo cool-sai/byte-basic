@@ -1,6 +1,7 @@
 package main
 
-// 通用树形内容存储：模块(module) → 列表(list) → 详情(detail) → 区块(block)。
+// 通用树形内容存储：模块(module) → 详情(detail) → 区块(block)。
+// 旧版有 list 层（module → list → detail），已删除；启动时 flattenLists 迁移历史数据（幂等）。
 // 每个节点的 data 是任意 JSON，带 schema_version，页面按数据结构自适应展示。
 // 页面（Agent 上传的 HTML/JS/CSS）按路径存多个版本，current 指针决定线上版本，可回滚。
 
@@ -15,7 +16,6 @@ import (
 
 const (
 	NodeModule = "module"
-	NodeList   = "list"
 	NodeDetail = "detail"
 	NodeBlock  = "block"
 )
@@ -23,12 +23,24 @@ const (
 // parentType 规定每种节点的父节点类型；module 挂在根（parent_id=0）。
 var parentType = map[string]string{
 	NodeModule: "",
-	NodeList:   NodeModule,
-	NodeDetail: NodeList,
+	NodeDetail: NodeModule,
 	NodeBlock:  NodeDetail,
 }
 
-var errNotFound = errors.New("not found")
+var (
+	errNotFound = errors.New("not found")
+	errConflict = errors.New("conflict")
+)
+
+// reservedModuleSlugs：会和 /api/v2/{module} 路由撞名的模块名。
+var reservedModuleSlugs = map[string]bool{"modules": true}
+
+func checkModuleSlug(typ, slug string) error {
+	if typ == NodeModule && reservedModuleSlugs[slug] {
+		return fmt.Errorf("模块名 %q 是保留字", slug)
+	}
+	return nil
+}
 
 type Node struct {
 	ID            int64           `json:"id"`
@@ -76,6 +88,8 @@ type ContentStore interface {
 	GetNode(id int64) (Node, error)
 	FindChild(parentID int64, typ, slug string) (Node, error)
 	ListChildren(parentID int64, typ string, page, size int) (NodePage, error)
+	// MoveNode 把节点改挂到 parentID 下（只改 parent_id，不校验类型）；新父下已有同 slug 时 errConflict。
+	MoveNode(id, parentID int64) error
 
 	PutPage(p string, files map[string]string) (PageVersion, error)
 	ListPageVersions(p string) ([]PageVersion, error)
@@ -123,7 +137,7 @@ func cleanSchemaVersion(v int) (int, error) {
 func checkParent(typ string, parent *Node) error {
 	want, ok := parentType[typ]
 	if !ok {
-		return fmt.Errorf("type 只能是 module/list/detail/block: %q", typ)
+		return fmt.Errorf("type 只能是 module/detail/block: %q", typ)
 	}
 	if want == "" {
 		if parent != nil {

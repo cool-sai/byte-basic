@@ -52,6 +52,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if moved, skipped, err := flattenLists(content); err != nil {
+		log.Fatalf("flatten lists: %v", err)
+	} else if moved+skipped > 0 {
+		log.Printf("flatten lists: moved %d details to their modules, skipped %d", moved, skipped)
+	}
 	cfg := contentConfigFromEnv()
 	log.Printf("board %s token=%s tokens=%s pages_host=%q", listen, redact(token), tokensFile, cfg.PagesHost)
 	log.Fatal(http.ListenAndServe(listen, newContentMux(token, board, tokens, content, cfg)))

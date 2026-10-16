@@ -119,6 +119,9 @@ func (s *mysqlContent) PutNode(in NodeInput) (Node, error) {
 		}
 		parent = &p
 	}
+	if err := checkModuleSlug(in.Type, slug); err != nil {
+		return Node{}, err
+	}
 	if err := checkParent(in.Type, parent); err != nil {
 		return Node{}, err
 	}
@@ -389,4 +392,24 @@ func (s *mysqlContent) ListPagePaths() ([]string, error) {
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+func (s *mysqlContent) MoveNode(id, parentID int64) error {
+	n, err := s.liveNode(s.db, id, false)
+	if err != nil {
+		return err
+	}
+	if n.ParentID == parentID {
+		return nil
+	}
+	var other int64
+	err = s.db.QueryRow(`SELECT id FROM board_node WHERE parent_id=? AND slug=?`, parentID, n.Slug).Scan(&other)
+	if err == nil {
+		return errConflict
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, err = s.db.Exec(`UPDATE board_node SET parent_id=?, updated_at=updated_at WHERE id=? AND deleted_at IS NULL`, parentID, id)
+	return err
 }
