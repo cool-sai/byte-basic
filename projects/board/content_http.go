@@ -226,7 +226,12 @@ func pagesHandler(c ContentStore, cfg contentConfig) http.Handler {
 			return
 		}
 		if r.URL.Path == "/" {
-			// 根路径固定是导航页；页面路径至少 1 段，Agent 上传无法覆盖它。
+			// 根路径：优先显示上传的 home 页面（index.html，资源需用 /home/ 绝对路径）；
+			// 没上传时回退到内置导航页。页面路径至少 1 段，上传无法直接占用根路径。
+			if files, err := c.PageFiles(homePagePath); err == nil && files["index.html"] != "" {
+				servePage(w, r, c, cfg, homePagePath+"/")
+				return
+			}
 			serveNav(w, r, c)
 			return
 		}
@@ -235,6 +240,9 @@ func pagesHandler(c ContentStore, cfg contentConfig) http.Handler {
 }
 
 // servePage 把 rest（如 finance/drawdown/app.js）拆成「页面路径 + 文件名」，取 current 版本。
+// homePagePath：pages 域名根路径展示的上传页面。
+const homePagePath = "home"
+
 func servePage(w http.ResponseWriter, r *http.Request, c ContentStore, cfg contentConfig, rest string) {
 	trailing := rest == "" || strings.HasSuffix(rest, "/")
 	segs := strings.Split(strings.Trim(rest, "/"), "/")

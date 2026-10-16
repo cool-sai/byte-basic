@@ -67,3 +67,24 @@ func TestNavCannotBeOverriddenByUpload(t *testing.T) {
 		t.Fatalf("nav overridden: %s", b)
 	}
 }
+
+func TestNavRootServesUploadedHome(t *testing.T) {
+	srv, c := contentServer(t, contentConfig{PagesHost: "pages.example"})
+	if _, err := c.PutPage("home", map[string]string{"index.html": "<p>home</p>", "assets/a.js": "js"}); err != nil {
+		t.Fatal(err)
+	}
+	res, b := navGet(t, srv.URL+"/", "pages.example")
+	if res.StatusCode != 200 || b != "<p>home</p>" || strings.Contains(b, "页面导航") {
+		t.Fatalf("root %d %q", res.StatusCode, b)
+	}
+	if !strings.Contains(res.Header.Get("Content-Security-Policy"), "script-src 'self'") {
+		t.Fatalf("csp: %s", res.Header.Get("Content-Security-Policy"))
+	}
+	if res, b := navGet(t, srv.URL+"/home/assets/a.js", "pages.example"); res.StatusCode != 200 || b != "js" {
+		t.Fatalf("asset %d %q", res.StatusCode, b)
+	}
+	// 主域名根路径不受影响
+	if _, b := navGet(t, srv.URL+"/", "main.example"); b == "<p>home</p>" {
+		t.Fatal("home leaked to main host")
+	}
+}
