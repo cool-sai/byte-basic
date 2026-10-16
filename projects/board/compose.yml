@@ -10,6 +10,10 @@ services:
       BOARD_TOKEN: ${BOARD_TOKEN}
       MYSQL: "root:minikitex@tcp(mysql:3306)/minikitex?parseTime=true&charset=utf8mb4"
       TZ: Asia/Shanghai
+      # 内容树页面托管：设了独立域名后页面只在该域名提供（见 docs/board-content-tree.md）
+      PAGES_HOST: ${BOARD_PAGES_HOST:-}
+      PAGES_API_ORIGIN: ${BOARD_PAGES_API_ORIGIN:-https://lssl.work}
+      PAGES_EXTRA_SRC: ${BOARD_PAGES_EXTRA_SRC:-}
     volumes:
       - board-data:/data
     expose:

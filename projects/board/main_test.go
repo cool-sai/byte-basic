@@ -120,7 +120,7 @@ func TestMCPInstructions(t *testing.T) {
 	if err := json.Unmarshal(b, &msg); err != nil {
 		t.Fatal(err)
 	}
-	if msg.Result.Instructions != mcpInstructions {
+	if msg.Result.Instructions != mcpInstructions+contentInstructions {
 		t.Fatalf("instructions %q", msg.Result.Instructions)
 	}
 }

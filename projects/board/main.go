@@ -48,12 +48,23 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("board %s token=%s tokens=%s", listen, redact(token), tokensFile)
-	log.Fatal(http.ListenAndServe(listen, newMux(token, board, tokens)))
+	content, err := newMySQLContent(board.db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	cfg := contentConfigFromEnv()
+	log.Printf("board %s token=%s tokens=%s pages_host=%q", listen, redact(token), tokensFile, cfg.PagesHost)
+	log.Fatal(http.ListenAndServe(listen, newContentMux(token, board, tokens, content, cfg)))
 }
 
+// newMux 只给旧测试用：内容树用内存实现，页面不走独立域名。
 func newMux(admin string, board Board, tokens *TokenStore) http.Handler {
+	return newContentMux(admin, board, tokens, newMemContent(), contentConfig{})
+}
+
+func newContentMux(admin string, board Board, tokens *TokenStore, content ContentStore, cfg contentConfig) http.Handler {
 	mux := http.NewServeMux()
+	registerContentRoutes(mux, content, cfg)
 	// 浏览器地址仍是 /board/...。TLB 剥掉这段前缀后，进程只看到后面的路径。
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -101,6 +112,7 @@ func newMux(admin string, board Board, tokens *TokenStore) http.Handler {
 		writeJSON(w, http.StatusOK, p)
 	})
 	server := newMCPServer(board)
+	addContentTools(server, content)
 	mux.HandleFunc("GET /api/tools", func(w http.ResponseWriter, _ *http.Request) {
 		docs, err := catalogFromMCP(server)
 		if err != nil {
@@ -149,7 +161,7 @@ func newMux(admin string, board Board, tokens *TokenStore) http.Handler {
 	mcpH := requireBearer(mcpOK, newMCPHandler(server))
 	mux.Handle("/mcp", mcpH)
 	mux.Handle("/mcp/", mcpH)
-	return mux
+	return withPagesHost(cfg, mux, pagesHandler(content, cfg))
 }
 
 func serveIndex(w http.ResponseWriter, _ *http.Request) {

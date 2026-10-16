@@ -58,7 +58,7 @@ const mcpInstructions = `通用看板：按种类（kind）收条目（item）�
 
 func newMCPServer(board Board) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "board", Version: "v0.1.0"}, &mcp.ServerOptions{
-		Instructions: mcpInstructions,
+		Instructions: mcpInstructions + contentInstructions,
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_kind",

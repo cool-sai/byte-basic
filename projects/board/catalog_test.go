@@ -27,7 +27,7 @@ func TestToolCatalogPageAndAPI(t *testing.T) {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Tools) != 9 {
+	if len(doc.Tools) != 17 { // 9 个旧工具 + 8 个内容树工具
 		t.Fatalf("catalog %d", len(doc.Tools))
 	}
 	got := map[string]toolDoc{}
