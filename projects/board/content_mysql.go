@@ -373,3 +373,20 @@ func (s *mysqlContent) PageFiles(p string) (map[string]string, error) {
 
 // fmtTime：驱动按 UTC 解析 TIMESTAMP（DSN 没带 loc），展示统一转成进程时区（容器 TZ=Asia/Shanghai）。
 func fmtTime(t time.Time) string { return t.In(time.Local).Format("2006-01-02 15:04:05") }
+
+func (s *mysqlContent) ListPagePaths() ([]string, error) {
+	rows, err := s.db.Query(`SELECT path FROM board_page WHERE current_version > 0 ORDER BY path LIMIT 1000`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

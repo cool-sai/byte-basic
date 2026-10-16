@@ -82,6 +82,8 @@ type ContentStore interface {
 	RollbackPage(p string, version int) (PageVersion, error)
 	// PageFiles 返回 current 版本的全部文件；没有该路径时 errNotFound。
 	PageFiles(p string) (map[string]string, error)
+	// ListPagePaths 返回所有有当前版本的页面路径（已排序），供导航页使用。
+	ListPagePaths() ([]string, error)
 }
 
 var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)

@@ -237,6 +237,19 @@ func (s *memContent) PageFiles(p string) (map[string]string, error) {
 	return s.pages[p][cur-1].files, nil
 }
 
+func (s *memContent) ListPagePaths() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []string{}
+	for p, cur := range s.current {
+		if cur > 0 {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 func sortedKeys(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

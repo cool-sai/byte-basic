@@ -220,6 +220,11 @@ func pagesHandler(c ContentStore, cfg contentConfig) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if r.URL.Path == "/" {
+			// 根路径固定是导航页；页面路径至少 1 段，Agent 上传无法覆盖它。
+			serveNav(w, r, c)
+			return
+		}
 		servePage(w, r, c, cfg, strings.TrimPrefix(r.URL.Path, "/"))
 	})
 }
