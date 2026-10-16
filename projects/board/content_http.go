@@ -150,6 +150,8 @@ func registerContentRoutes(mux *http.ServeMux, c ContentStore, cfg contentConfig
 		if !ok {
 			return
 		}
+		// include=data：区块连同 data 一次返回（ListChildren 本就是一条 SQL 批量取，无 N+1）；默认只给清单。
+		withData := r.URL.Query().Get("include") == "data"
 		blocks := []Node{}
 		for page := 1; page <= 10; page++ {
 			p, err := c.ListChildren(d.ID, NodeBlock, page, 100)
@@ -158,7 +160,10 @@ func registerContentRoutes(mux *http.ServeMux, c ContentStore, cfg contentConfig
 				return
 			}
 			for _, b := range p.Items {
-				blocks = append(blocks, b.brief())
+				if !withData {
+					b = b.brief()
+				}
+				blocks = append(blocks, b)
 			}
 			if page*100 >= p.Total {
 				break

@@ -45,7 +45,8 @@ module（模块，如 finance）
 | `GET /board/api/v2/modules?page=&size=` | 模块分页 |
 | `GET /board/api/v2/modules/{slug}/lists?page=&size=` | `{module, lists}` |
 | `GET /board/api/v2/lists/{id}/details?page=&size=` | `{list, details}`，新到旧，size 默认 20、最大 100 |
-| `GET /board/api/v2/details/{id}` | `{detail, blocks}`；blocks 只有清单（id/slug/title/schema_version），不含 data |
+| `GET /board/api/v2/details/{id}` | `{detail, blocks}`；blocks 只有清单（id/slug/title/schema_version），不含 data，便于页面按需懒加载 |
+| `GET /board/api/v2/details/{id}?include=data` | 同上，但每个区块都带 data，一次请求拿全（服务端每 100 个区块一条查询，无 N+1；最多 1000 个区块）。`include` 只认 `data`，其他值按默认处理 |
 | `GET /board/api/v2/details/{id}/blocks/{slug}` | 单个区块，含 data |
 
 id 类型不对（比如拿 list 的 id 查 details/{id}）、节点已删除或不存在，一律 404。

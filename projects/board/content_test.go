@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -354,5 +355,35 @@ func TestContentMCPTools(t *testing.T) {
 	vs := call("list_page_versions", map[string]any{"path": "news/today"})["versions"].([]any)
 	if len(vs) != 2 || vs[1].(map[string]any)["current"] != true {
 		t.Fatalf("versions %v", vs)
+	}
+}
+
+func TestDetailIncludeData(t *testing.T) {
+	srv, c := contentServer(t, contentConfig{})
+	_, _, det := seedTree(t, c)
+	type resp struct {
+		Blocks []Node `json:"blocks"`
+	}
+	for _, tc := range []struct {
+		q    string
+		data bool
+	}{{"", false}, {"?include=data", true}, {"?include=other", false}} {
+		var out resp
+		if res := getJSON(t, srv.URL+"/api/v2/details/"+strconv.FormatInt(det.ID, 10)+tc.q, &out); res.StatusCode != 200 {
+			t.Fatalf("%s -> %d", tc.q, res.StatusCode)
+		}
+		if len(out.Blocks) != 2 {
+			t.Fatalf("%s blocks %d", tc.q, len(out.Blocks))
+		}
+		got := map[string]string{}
+		for _, b := range out.Blocks {
+			got[b.Slug] = string(b.Data)
+		}
+		if tc.data && (got["triggers"] != `{"hs300":17.2}` || got["funds"] != `[1,2]`) {
+			t.Fatalf("include=data: %v", got)
+		}
+		if !tc.data && (got["triggers"] != "" || got["funds"] != "") {
+			t.Fatalf("%s should omit data: %v", tc.q, got)
+		}
 	}
 }
