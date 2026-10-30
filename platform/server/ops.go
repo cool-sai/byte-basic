@@ -585,15 +585,9 @@ func (s *server) compileJob(job scmJob, branch, ver, binPath string, live *liveR
 		return commit, err
 	}
 	if job.Label == "image" {
-		fmt.Fprintf(live, "$ git archive HEAD -> %s\n", binPath)
-		cmd := exec.Command("git", "-C", repo, "archive", "--format=tar", "-o", binPath, "HEAD")
-		cmd.Stdout = live
-		cmd.Stderr = live
-		if err := cmd.Run(); err != nil {
+		fmt.Fprintf(live, "image artifact @ %s (scm-work/%s)\n", commit, job.Name)
+		if err := writeImageArtifactMarker(binPath, commit); err != nil {
 			return commit, err
-		}
-		if _, stErr := os.Stat(binPath); stErr != nil {
-			return commit, fmt.Errorf("git archive missing %s", binPath)
 		}
 		return commit, nil
 	}
@@ -1090,7 +1084,7 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 			finish("fail", err)
 			return
 		}
-		if err := s.buildImageArtifact(live, src, job.ScriptPath, imageVer, imageLocal); err != nil {
+		if err := s.buildImageArtifact(live, src, job, ver, imageVer, imageLocal); err != nil {
 			finish("fail", err)
 			return
 		}
@@ -1325,22 +1319,87 @@ func (s *server) composeSidecar(w io.Writer, args ...string) error {
 	return cmd.Run()
 }
 
-func (s *server) buildImageArtifact(lg io.Writer, src, dockerfile, imageVer, imageLocal string) error {
-	tmp, err := os.MkdirTemp("", "mk-img-")
+func writeImageArtifactMarker(binPath, commit string) error {
+	body := "minikitex-image\ncommit=" + commit + "\n"
+	return os.WriteFile(binPath, []byte(body), 0o644)
+}
+
+func imageArtifactCommit(src string) string {
+	f, err := os.Open(src)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	buf = buf[:n]
+	if !bytes.HasPrefix(buf, []byte("minikitex-image\n")) {
+		return ""
+	}
+	for _, line := range strings.Split(string(buf), "\n") {
+		if c, ok := strings.CutPrefix(line, "commit="); ok {
+			return strings.TrimSpace(c)
+		}
+	}
+	return ""
+}
+
+func (s *server) lookupBuildCommit(service, ver string) string {
+	var c string
+	_ = s.db.QueryRow(
+		`SELECT git_commit FROM scm_build WHERE service=? AND version=? AND status='ok' ORDER BY id DESC LIMIT 1`,
+		service, ver,
+	).Scan(&c)
+	return strings.TrimSpace(c)
+}
+
+func (s *server) ensureImageWork(job scmJob, commit string, lg io.Writer) (string, error) {
+	work := filepath.Join(s.root, "scm-work", job.Name)
+	if _, err := os.Stat(filepath.Join(work, ".git")); err != nil {
+		var err error
+		work, err = s.gitSync(job.Name, job.GitURL, "", lg)
+		if err != nil {
+			return "", err
+		}
+	}
+	if commit == "" {
+		fmt.Fprintf(lg, "warning: no git commit recorded; using scm-work/%s HEAD\n", job.Name)
+		return work, nil
+	}
+	if out, err := exec.Command("git", "-C", work, "rev-parse", "HEAD").Output(); err == nil {
+		if strings.TrimSpace(string(out)) == commit {
+			return work, nil
+		}
+	}
+	fmt.Fprintf(lg, "$ git checkout --detach %s\n", commit)
+	if err := streamGit(lg, work, "checkout", "--detach", commit); err != nil {
+		fmt.Fprint(lg, "$ git fetch origin\n")
+		if err := streamGit(lg, work, "fetch", "--progress", "origin"); err != nil {
+			return "", fmt.Errorf("git fetch for checkout %s: %w", commit, err)
+		}
+		if err := streamGit(lg, work, "checkout", "--detach", commit); err != nil {
+			return "", fmt.Errorf("git checkout %s: %w", commit, err)
+		}
+	}
+	return work, nil
+}
+
+// buildImageArtifact builds from scm-work at the recorded git commit (no git-archive tar).
+func (s *server) buildImageArtifact(lg io.Writer, src string, job scmJob, ver, imageVer, imageLocal string) error {
+	commit := imageArtifactCommit(src)
+	if commit == "" {
+		commit = s.lookupBuildCommit(job.Name, ver)
+	}
+	work, err := s.ensureImageWork(job, commit, lg)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmp)
-	fmt.Fprintf(lg, "unpack %s\n", src)
-	untar := exec.Command("tar", "-xf", src, "-C", tmp)
-	untar.Stdout = lg
-	untar.Stderr = lg
-	if err := untar.Run(); err != nil {
-		return fmt.Errorf("unpack image artifact: %w", err)
+	if _, err := scriptInRepo(work, job.ScriptPath); err != nil {
+		return err
 	}
-	fmt.Fprintf(lg, "$ docker build -f %s\n", dockerfile)
-	build := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, "-f", dockerfile, ".")
-	build.Dir = tmp
+	fmt.Fprintf(lg, "$ docker build -f %s (dir=%s)\n", job.ScriptPath, work)
+	build := exec.Command("docker", "build", "-t", imageVer, "-t", imageLocal, "-f", job.ScriptPath, ".")
+	build.Dir = work
 	build.Stdout = lg
 	build.Stderr = lg
 	return build.Run()
@@ -1572,6 +1631,48 @@ func composeFromArtifact(src, svc string) ([]byte, error) {
 	return b, nil
 }
 
+func composeFromWork(work, svc string) ([]byte, error) {
+	if svc == "" || !jobName.MatchString(svc) {
+		return nil, fmt.Errorf("bad service")
+	}
+	p := filepath.Join(work, "projects", svc, "compose.yml")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(string(b)) == "" {
+		return nil, fmt.Errorf("empty %s", p)
+	}
+	return b, nil
+}
+
+// syncHostRootCompose copies scm-work's root docker-compose.yml onto HOST_ROOT.
+// No backup / _root.yml staging — repo compose is the source of truth for image deploys.
+func syncHostRootCompose(lg io.Writer, hostRoot, work string) error {
+	src := filepath.Join(work, "docker-compose.yml")
+	body, err := os.ReadFile(src)
+	if err != nil {
+		return nil
+	}
+	if strings.TrimSpace(string(body)) == "" || !strings.Contains(string(body), "services:") {
+		return nil
+	}
+	dst := filepath.Join(hostRoot, "docker-compose.yml")
+	if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, body) {
+		if lg != nil {
+			fmt.Fprintf(lg, "root compose unchanged\n")
+		}
+		return nil
+	}
+	if err := os.WriteFile(dst, body, 0o644); err != nil {
+		return fmt.Errorf("sync root compose: %w", err)
+	}
+	if lg != nil {
+		fmt.Fprintf(lg, "synced root compose <- %s\n", src)
+	}
+	return nil
+}
+
 func pinRuntimeImage(raw []byte, svc, image string) ([]byte, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
@@ -1607,6 +1708,12 @@ func (s *server) syncRuntimeCompose(lg io.Writer, app deployApp, label, src stri
 			return nil
 		}
 	}
+	work := filepath.Join(s.root, "scm-work", app.ScmName)
+	if label == "image" {
+		if err := syncHostRootCompose(lg, s.root, work); err != nil {
+			return err
+		}
+	}
 	main, err := s.mainComposeServices()
 	if err != nil {
 		return err
@@ -1618,7 +1725,14 @@ func (s *server) syncRuntimeCompose(lg io.Writer, app deployApp, label, src stri
 	image := "minikitex-" + app.Name + ":local"
 	for _, c := range extraCompose(app.Compose, main) {
 		body := runtimeServiceYAML(c, image, label)
-		if raw, err := composeFromArtifact(src, c); err == nil {
+		var raw []byte
+		var overlayErr error
+		if label == "image" {
+			raw, overlayErr = composeFromWork(work, c)
+		} else {
+			raw, overlayErr = composeFromArtifact(src, c)
+		}
+		if overlayErr == nil {
 			if pinned, err := pinRuntimeImage(raw, c, image); err == nil {
 				body = string(pinned)
 				if lg != nil {

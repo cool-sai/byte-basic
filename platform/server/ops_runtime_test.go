@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -160,5 +161,110 @@ func TestSplitCombinedRuntime(t *testing.T) {
 	}
 	if !strings.Contains(string(api), "  home:") || !strings.Contains(string(api), "LISTEN") {
 		t.Fatalf("home.yml:\n%s", api)
+	}
+}
+
+func TestImageArtifactMarker(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "art")
+	if err := writeImageArtifactMarker(path, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	if got := imageArtifactCommit(path); got != "abc123" {
+		t.Fatalf("commit %q", got)
+	}
+	// non-marker (e.g. old tar / binary) -> empty
+	if err := os.WriteFile(path, []byte("not a marker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := imageArtifactCommit(path); got != "" {
+		t.Fatalf("want empty, got %q", got)
+	}
+}
+
+func TestSyncHostRootComposeAndWorkOverlay(t *testing.T) {
+	host := t.TempDir()
+	work := t.TempDir()
+	repoCompose := []byte(`services:
+  platform:
+    image: minikitex-platform:local
+    pull_policy: never
+`)
+	if err := os.WriteFile(filepath.Join(work, "docker-compose.yml"), repoCompose, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := []byte("services:\n  platform:\n    image: old\n")
+	hostCompose := filepath.Join(host, "docker-compose.yml")
+	if err := os.WriteFile(hostCompose, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	if err := syncHostRootCompose(&log, host, work); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(hostCompose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, repoCompose) {
+		t.Fatalf("host compose not synced: %q", got)
+	}
+	if !strings.Contains(log.String(), "synced root compose") {
+		t.Fatalf("log %q", log.String())
+	}
+	if _, err := os.Stat(hostCompose + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("unexpected bak: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(host, "deploy", "runtime", "_root.yml")); !os.IsNotExist(err) {
+		t.Fatal("should not stage _root.yml")
+	}
+
+	log.Reset()
+	if err := syncHostRootCompose(&log, host, work); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(log.String(), "unchanged") {
+		t.Fatalf("expected unchanged, got %q", log.String())
+	}
+
+	// golang/node path: no scm-work compose -> leave host alone
+	emptyWork := t.TempDir()
+	if err := os.WriteFile(hostCompose, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log.Reset()
+	if err := syncHostRootCompose(&log, host, emptyWork); err != nil {
+		t.Fatal(err)
+	}
+	hostAfter, _ := os.ReadFile(hostCompose)
+	if !bytes.Equal(hostAfter, old) {
+		t.Fatalf("host mutated without work compose: %q", hostAfter)
+	}
+	if log.Len() != 0 {
+		t.Fatalf("expected silent skip, got %q", log.String())
+	}
+
+	overlay := []byte("services:\n  board:\n    image: x\n    ports: [\"8090:8090\"]\n")
+	if err := os.MkdirAll(filepath.Join(work, "projects", "board"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "projects", "board", "compose.yml"), overlay, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := composeFromWork(work, "board")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, overlay) {
+		t.Fatalf("overlay %q", raw)
+	}
+	if _, err := composeFromWork(work, "nope"); err == nil {
+		t.Fatal("expected missing service")
+	}
+
+	s := &server{root: host}
+	args := s.composeFileArgs()
+	if len(args) < 2 || args[0] != "-f" || args[1] != "docker-compose.yml" {
+		t.Fatalf("composeFileArgs %v", args)
 	}
 }
