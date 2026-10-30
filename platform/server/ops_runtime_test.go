@@ -182,9 +182,35 @@ func TestImageArtifactMarker(t *testing.T) {
 	}
 }
 
-func TestSyncHostRootComposeAndWorkOverlay(t *testing.T) {
+func TestComposeProjectDirAndWorkOverlay(t *testing.T) {
 	host := t.TempDir()
-	work := t.TempDir()
+	old := []byte("services:\n  platform:\n    image: old\n")
+	hostCompose := filepath.Join(host, "docker-compose.yml")
+	if err := os.WriteFile(hostCompose, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &server{root: host}
+
+	// golang/node/python: stay on HOST_ROOT
+	if got := s.composeProjectDir("golang", "user"); got != host {
+		t.Fatalf("golang dir %q", got)
+	}
+	if got := s.composeProjectDir("node", "home-web"); got != host {
+		t.Fatalf("node dir %q", got)
+	}
+	if got := s.composeProjectDir("python", "x"); got != host {
+		t.Fatalf("python dir %q", got)
+	}
+
+	// image without scm-work compose -> fall back to host
+	if got := s.composeProjectDir("image", "platform-api"); got != host {
+		t.Fatalf("missing work fallback %q", got)
+	}
+
+	work := filepath.Join(host, "scm-work", "platform-api")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	repoCompose := []byte(`services:
   platform:
     image: minikitex-platform:local
@@ -193,55 +219,14 @@ func TestSyncHostRootComposeAndWorkOverlay(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, "docker-compose.yml"), repoCompose, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	old := []byte("services:\n  platform:\n    image: old\n")
-	hostCompose := filepath.Join(host, "docker-compose.yml")
-	if err := os.WriteFile(hostCompose, old, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var log strings.Builder
-	if err := syncHostRootCompose(&log, host, work); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(hostCompose)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, repoCompose) {
-		t.Fatalf("host compose not synced: %q", got)
-	}
-	if !strings.Contains(log.String(), "synced root compose") {
-		t.Fatalf("log %q", log.String())
-	}
-	if _, err := os.Stat(hostCompose + ".bak"); !os.IsNotExist(err) {
-		t.Fatalf("unexpected bak: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(host, "deploy", "runtime", "_root.yml")); !os.IsNotExist(err) {
-		t.Fatal("should not stage _root.yml")
+	if got := s.composeProjectDir("image", "platform-api"); got != work {
+		t.Fatalf("image dir %q want %q", got, work)
 	}
 
-	log.Reset()
-	if err := syncHostRootCompose(&log, host, work); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(log.String(), "unchanged") {
-		t.Fatalf("expected unchanged, got %q", log.String())
-	}
-
-	// golang/node path: no scm-work compose -> leave host alone
-	emptyWork := t.TempDir()
-	if err := os.WriteFile(hostCompose, old, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	log.Reset()
-	if err := syncHostRootCompose(&log, host, emptyWork); err != nil {
-		t.Fatal(err)
-	}
-	hostAfter, _ := os.ReadFile(hostCompose)
-	if !bytes.Equal(hostAfter, old) {
-		t.Fatalf("host mutated without work compose: %q", hostAfter)
-	}
-	if log.Len() != 0 {
-		t.Fatalf("expected silent skip, got %q", log.String())
+	// must not overwrite HOST compose
+	hostBefore, _ := os.ReadFile(hostCompose)
+	if !bytes.Equal(hostBefore, old) {
+		t.Fatalf("host compose mutated: %q", hostBefore)
 	}
 
 	overlay := []byte("services:\n  board:\n    image: x\n    ports: [\"8090:8090\"]\n")
@@ -262,9 +247,30 @@ func TestSyncHostRootComposeAndWorkOverlay(t *testing.T) {
 		t.Fatal("expected missing service")
 	}
 
-	s := &server{root: host}
-	args := s.composeFileArgs()
-	if len(args) < 2 || args[0] != "-f" || args[1] != "docker-compose.yml" {
+	if err := os.MkdirAll(filepath.Join(host, "deploy", "runtime"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(host, "deploy", "runtime", "board.yml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := s.composeFileArgs(work)
+	if len(args) < 4 || args[0] != "-f" || args[1] != filepath.Join(work, "docker-compose.yml") {
 		t.Fatalf("composeFileArgs %v", args)
+	}
+	if args[2] != "-f" || args[3] != filepath.Join(host, "deploy", "runtime", "board.yml") {
+		t.Fatalf("overlay args %v", args)
+	}
+	argsHost := s.composeFileArgs(host)
+	if argsHost[1] != filepath.Join(host, "docker-compose.yml") {
+		t.Fatalf("host composeFileArgs %v", argsHost)
+	}
+}
+
+func TestDockerVolumeName(t *testing.T) {
+	if got := dockerVolumeName("/var/lib/docker/volumes/golang_scm-work/_data"); got != "golang_scm-work" {
+		t.Fatalf("got %q", got)
+	}
+	if got := dockerVolumeName("/opt/byte-basic"); got != "" {
+		t.Fatalf("bind %q", got)
 	}
 }

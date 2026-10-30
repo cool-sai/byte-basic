@@ -1103,7 +1103,8 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 		finish("fail", err)
 		return
 	}
-	fmt.Fprintf(live, "$ docker compose up --no-deps --force-recreate -d %s\n", strings.Join(app.Compose, " "))
+	projectDir := s.composeProjectDir(label, app.ScmName)
+	fmt.Fprintf(live, "$ docker compose -f %s/docker-compose.yml up --no-deps --force-recreate -d %s\n", projectDir, strings.Join(app.Compose, " "))
 	replacesSelf := false
 	for _, svc := range app.Compose {
 		if svc == "platform" {
@@ -1114,12 +1115,12 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 	if replacesSelf {
 		// compose 会换掉当前进程，写完再换，失败且进程还在时改回 fail。
 		finish("ok", nil)
-		if err := s.composeUp(live, app.Compose); err != nil {
+		if err := s.composeUp(live, app.Compose, projectDir); err != nil {
 			finish("fail", err)
 		}
 		return
 	}
-	if err := s.composeUp(live, app.Compose); err != nil {
+	if err := s.composeUp(live, app.Compose, projectDir); err != nil {
 		finish("fail", err)
 		return
 	}
@@ -1211,17 +1212,31 @@ func decodeComposePS(raw []byte) ([]*v1.Container, error) {
 	}
 }
 
-func (s *server) composeFileArgs() []string {
-	files := []string{"docker-compose.yml"}
+// composeProjectDir picks where docker compose reads the root yaml.
+// image deploys use scm-work/<job> so HOST_ROOT compose is not overwritten;
+// golang/node/python keep HOST_ROOT (/work).
+func (s *server) composeProjectDir(label, scmName string) string {
+	if label == "image" && scmName != "" {
+		work := filepath.Join(s.root, "scm-work", scmName)
+		if _, err := os.Stat(filepath.Join(work, "docker-compose.yml")); err == nil {
+			return work
+		}
+	}
+	return s.root
+}
+
+func (s *server) composeFileArgs(projectDir string) []string {
+	if projectDir == "" {
+		projectDir = s.root
+	}
+	files := []string{filepath.Join(projectDir, "docker-compose.yml")}
 	matches, err := filepath.Glob(filepath.Join(s.root, "deploy", "runtime", "*.yml"))
 	if err == nil {
 		sort.Strings(matches)
-		for _, p := range matches {
-			files = append(files, filepath.Join("deploy", "runtime", filepath.Base(p)))
-		}
+		files = append(files, matches...)
 	}
-	if _, err := os.Stat(filepath.Join(s.root, "deploy", "runtime.yml")); err == nil {
-		files = append(files, "deploy/runtime.yml")
+	if p := filepath.Join(s.root, "deploy", "runtime.yml"); fileExists(p) {
+		files = append(files, p)
 	}
 	args := make([]string, 0, len(files)*2)
 	for _, f := range files {
@@ -1230,10 +1245,24 @@ func (s *server) composeFileArgs() []string {
 	return args
 }
 
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
 func (s *server) composeCmd(args ...string) *exec.Cmd {
-	prefix := append([]string{"compose"}, s.composeFileArgs()...)
+	return s.composeCmdDir(s.root, args...)
+}
+
+func (s *server) composeCmdDir(projectDir string, args ...string) *exec.Cmd {
+	if projectDir == "" {
+		projectDir = s.root
+	}
+	prefix := append([]string{"compose", "--project-directory", projectDir}, s.composeFileArgs(projectDir)...)
 	cmd := exec.Command("docker", append(prefix, args...)...)
-	cmd.Dir = s.root
+	cmd.Dir = projectDir
+	host := s.hostRoot()
+	cmd.Env = append(os.Environ(), "HOST_ROOT="+host, "PWD="+projectDir)
 	return cmd
 }
 
@@ -1242,21 +1271,24 @@ func (s *server) compose(args ...string) (string, error) {
 	return string(b), err
 }
 
-func (s *server) composeTo(w io.Writer, args ...string) error {
-	cmd := s.composeCmd(args...)
+func (s *server) composeTo(w io.Writer, projectDir string, args ...string) error {
+	cmd := s.composeCmdDir(projectDir, args...)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	return cmd.Run()
 }
 
-func (s *server) composeUp(w io.Writer, services []string) error {
+func (s *server) composeUp(w io.Writer, services []string, projectDir string) error {
+	if projectDir == "" {
+		projectDir = s.root
+	}
 	args := append([]string{"up", "--no-deps", "--force-recreate", "-d"}, services...)
 	for _, svc := range services {
 		if svc == "platform" {
-			return s.composeSidecar(w, args...)
+			return s.composeSidecar(w, projectDir, args...)
 		}
 	}
-	return s.composeTo(w, args...)
+	return s.composeTo(w, projectDir, args...)
 }
 
 func mountSource(dest string) string {
@@ -1296,24 +1328,46 @@ func (s *server) hostRoot() string {
 	return s.root
 }
 
-func (s *server) composeSidecar(w io.Writer, args ...string) error {
+func dockerVolumeName(mountSrc string) string {
+	const prefix, suffix = "/var/lib/docker/volumes/", "/_data"
+	if strings.HasPrefix(mountSrc, prefix) && strings.HasSuffix(mountSrc, suffix) {
+		return strings.TrimSuffix(strings.TrimPrefix(mountSrc, prefix), suffix)
+	}
+	return ""
+}
+
+func (s *server) composeSidecar(w io.Writer, projectDir string, args ...string) error {
 	root := s.hostRoot()
 	if root == "" || root == "/work" {
 		return fmt.Errorf("HOST_ROOT 不是宿主机路径: %q", root)
 	}
-	fmt.Fprintf(w, "$ docker run --rm compose-sidecar HOST_ROOT=%s\n", root)
-	composeArgs := append([]string{"compose"}, s.composeFileArgs()...)
+	if projectDir == "" {
+		projectDir = s.root
+	}
+	fmt.Fprintf(w, "$ docker run --rm compose-sidecar HOST_ROOT=%s -w %s\n", root, projectDir)
+	composeArgs := append([]string{"compose", "--project-directory", projectDir}, s.composeFileArgs(projectDir)...)
 	composeArgs = append(composeArgs, args...)
-	cmd := exec.Command("docker", append([]string{
+	// Sidecar must see docker.sock + HOST_ROOT paths for ${HOST_ROOT} binds,
+	// and scm-work named volume when projectDir is under /work/scm-work.
+	run := []string{
 		"run", "--rm",
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
-		"-v", root + ":" + root,
-		"-w", root,
-		"-e", "HOST_ROOT=" + root,
-		"-e", "PWD=" + root,
+		"-v", root + ":/work",
+	}
+	scmRoot := filepath.Join(s.root, "scm-work")
+	if rel, err := filepath.Rel(scmRoot, projectDir); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		if vol := dockerVolumeName(mountSource("/work/scm-work")); vol != "" {
+			run = append(run, "-v", vol+":/work/scm-work")
+		}
+	}
+	run = append(run,
+		"-w", projectDir,
+		"-e", "HOST_ROOT="+root,
+		"-e", "PWD="+projectDir,
 		"--entrypoint", "docker",
 		"minikitex-platform:local",
-	}, composeArgs...)...)
+	)
+	cmd := exec.Command("docker", append(run, composeArgs...)...)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	return cmd.Run()
@@ -1583,8 +1637,17 @@ func splitCombinedRuntime(root string) error {
 }
 
 func (s *server) mainComposeServices() (map[string]bool, error) {
-	cmd := exec.Command("docker", "compose", "-f", "docker-compose.yml", "config", "--services")
-	cmd.Dir = s.root
+	return s.mainComposeServicesDir(s.root)
+}
+
+func (s *server) mainComposeServicesDir(dir string) (map[string]bool, error) {
+	if dir == "" {
+		dir = s.root
+	}
+	compose := filepath.Join(dir, "docker-compose.yml")
+	cmd := exec.Command("docker", "compose", "-f", compose, "--project-directory", dir, "config", "--services")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "HOST_ROOT="+s.hostRoot())
 	b, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("compose config: %w\n%s", err, b)
@@ -1646,33 +1709,6 @@ func composeFromWork(work, svc string) ([]byte, error) {
 	return b, nil
 }
 
-// syncHostRootCompose copies scm-work's root docker-compose.yml onto HOST_ROOT.
-// No backup / _root.yml staging — repo compose is the source of truth for image deploys.
-func syncHostRootCompose(lg io.Writer, hostRoot, work string) error {
-	src := filepath.Join(work, "docker-compose.yml")
-	body, err := os.ReadFile(src)
-	if err != nil {
-		return nil
-	}
-	if strings.TrimSpace(string(body)) == "" || !strings.Contains(string(body), "services:") {
-		return nil
-	}
-	dst := filepath.Join(hostRoot, "docker-compose.yml")
-	if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, body) {
-		if lg != nil {
-			fmt.Fprintf(lg, "root compose unchanged\n")
-		}
-		return nil
-	}
-	if err := os.WriteFile(dst, body, 0o644); err != nil {
-		return fmt.Errorf("sync root compose: %w", err)
-	}
-	if lg != nil {
-		fmt.Fprintf(lg, "synced root compose <- %s\n", src)
-	}
-	return nil
-}
-
 func pinRuntimeImage(raw []byte, svc, image string) ([]byte, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
@@ -1709,12 +1745,16 @@ func (s *server) syncRuntimeCompose(lg io.Writer, app deployApp, label, src stri
 		}
 	}
 	work := filepath.Join(s.root, "scm-work", app.ScmName)
+	mainDir := s.root
 	if label == "image" {
-		if err := syncHostRootCompose(lg, s.root, work); err != nil {
-			return err
+		if _, err := os.Stat(filepath.Join(work, "docker-compose.yml")); err == nil {
+			mainDir = work
+			if lg != nil {
+				fmt.Fprintf(lg, "compose project dir %s (no HOST compose overwrite)\n", work)
+			}
 		}
 	}
-	main, err := s.mainComposeServices()
+	main, err := s.mainComposeServicesDir(mainDir)
 	if err != nil {
 		return err
 	}
