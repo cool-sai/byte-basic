@@ -178,6 +178,8 @@ services:
       - "8081:8081"
     volumes:
       - ${HOST_ROOT:-.}:/work
+      # 宿主机 SSH（含 config / id_* / known_hosts），供容器内 git@ URL 使用
+      - ${HOST_SSH_DIR:-/root/.ssh}:/root/.ssh:ro
       - scm-work:/work/scm-work
       - artifacts:/work/artifacts
       - tlb-conf:/tlb-conf

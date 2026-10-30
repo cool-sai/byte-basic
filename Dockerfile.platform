@@ -18,7 +18,7 @@ RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2 \
 
 FROM alpine:3.20
 RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
- && apk add --no-cache git go nodejs npm docker-cli docker-cli-compose ca-certificates tzdata
+ && apk add --no-cache git openssh-client go nodejs npm docker-cli docker-cli-compose ca-certificates tzdata
 COPY --from=api /usr/local/bin/platform /usr/local/bin/platform
 COPY --from=api /go/bin/ /usr/local/bin/
 RUN npm install --prefix /opt/buf-es @bufbuild/protoc-gen-es@2.13.0 --registry=https://registry.npmmirror.com --fetch-retries=8
