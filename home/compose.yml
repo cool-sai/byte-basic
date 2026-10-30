@@ -1,0 +1,27 @@
+# 本机只验证 home：在仓库根执行
+#   docker compose -f home/compose.yml up -d --build
+# 落地页: http://127.0.0.1:8080/
+# 项目页: http://127.0.0.1:8080/projects
+# API:    http://127.0.0.1:8082/api/sites
+name: home-local
+
+services:
+  home-api:
+    build:
+      context: ..
+      dockerfile: home/Dockerfile.api
+    image: home-api:local
+    environment:
+      LISTEN: "0.0.0.0:8082"
+    ports:
+      - "8082:8082"
+
+  home-web:
+    build:
+      context: ..
+      dockerfile: home/Dockerfile.web
+    image: home-web:local
+    ports:
+      - "8080:80"
+    depends_on:
+      - home-api

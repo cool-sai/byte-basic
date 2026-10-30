@@ -26,6 +26,7 @@ func TestListSitesREST(t *testing.T) {
 	var body struct {
 		Sites []struct {
 			Href string `json:"href"`
+			Name string `json:"name"`
 		} `json:"sites"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
@@ -33,6 +34,9 @@ func TestListSitesREST(t *testing.T) {
 	}
 	if len(body.Sites) == 0 || body.Sites[0].Href != "/minikitex/" {
 		t.Fatalf("%s", rec.Body.String())
+	}
+	if len(body.Sites) < 3 {
+		t.Fatalf("want showcase sites, got %d", len(body.Sites))
 	}
 }
 
