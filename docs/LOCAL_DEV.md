@@ -1,41 +1,39 @@
 # 本机开发环境（Mac）— home 落地页
 
-不依赖本机 Node / Go；**只用 Docker Desktop + compose**。
+业务进程本机直接起（Node / Go），**不打业务镜像**。Docker 只用于 MySQL 等中间件（本服务当前无 DB 依赖）。
 
 ## 前置
 
-```bash
-export PATH="/Applications/Docker.app/Contents/Resources/bin:$HOME/.docker/bin:$PATH"
-open -a Docker   # 等 daemon 就绪
-docker info
-```
+- Go（跑 `home/server`）
+- Node.js + npm（跑 `home/web` Vite）
 
-Dockerfile 已用 `docker.m.daocloud.io/library/...` 拉基础镜像。若仍超时，可给 Docker Desktop 配系统代理（本机 Clash `7897`）。
+## 起 API
 
-## 起 home（推荐）
-
-在仓库根：
+仓库根：
 
 ```bash
 cd ~/Desktop/projects/byte-basic
-docker compose -f home/compose.yml up -d --build
+go run ./home/server
+```
+
+默认监听 `http://127.0.0.1:8082`（含 REST `/api/sites` 与 Connect）。
+
+## 起前端
+
+```bash
+cd ~/Desktop/projects/byte-basic/home/web
+npm ci   # 首次
+npm run dev -- --host 127.0.0.1 --port 5175
 ```
 
 | 入口 | URL |
 |------|-----|
-| 炫酷首页 | http://127.0.0.1:8080/ |
-| 项目页 | http://127.0.0.1:8080/projects |
-| API | http://127.0.0.1:8082/api/sites |
-| API（经 nginx） | http://127.0.0.1:8080/api/sites |
+| 炫酷首页 | http://127.0.0.1:5175/ |
+| 项目页 | http://127.0.0.1:5175/projects |
+| API（直连） | http://127.0.0.1:8082/api/sites |
 
-停掉：
+Vite 已把 `/api`（含 Connect `/api/home.v1.HomeService`）代理到 `8082`，本地不用 nginx。
 
-```bash
-docker compose -f home/compose.yml down
-```
+## 上线
 
-## 说明
-
-- `home-web`：容器内 `npm ci && build`，nginx 托管 SPA；`/api/home.v1.HomeService/` 去 `/api` 前缀后反代（Connect），`/api/` 其余原样反代（REST `/api/sites`）
-- `home-api`：容器内 `go build ./home/server`
-- 上线仍走部署平台 SCM（`scripts/scm/home-web.sh` / `home-api.sh`），本 compose 只做本机验证
+仍走部署平台 SCM：`scripts/scm/home-web.sh` / `home-api.sh`。
