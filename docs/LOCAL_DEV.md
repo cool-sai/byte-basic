@@ -36,6 +36,6 @@ docker compose -f home/compose.yml down
 
 ## 说明
 
-- `home-web`：容器内 `npm ci && build`，nginx 托管 SPA，`/api` 反代到 `home-api`
+- `home-web`：容器内 `npm ci && build`，nginx 托管 SPA；`/api/home.v1.HomeService/` 去 `/api` 前缀后反代（Connect），`/api/` 其余原样反代（REST `/api/sites`）
 - `home-api`：容器内 `go build ./home/server`
 - 上线仍走部署平台 SCM（`scripts/scm/home-web.sh` / `home-api.sh`），本 compose 只做本机验证
