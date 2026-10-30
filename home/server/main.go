@@ -26,6 +26,42 @@ func (server) ListSites(context.Context, *connect.Request[v1.ListSitesRequest]) 
 				Desc:  "控制台 · SCM / BAM / AGW / TLB / Deploy",
 				Href:  "/minikitex/",
 			},
+			{
+				Name:  "agent",
+				Title: "Agent",
+				Desc:  "Agent 控制台 · Go / Python",
+				Href:  "/agent/",
+			},
+			{
+				Name:  "pages",
+				Title: "pages.lssl.work",
+				Desc:  "Agent 页面托管 · put_page 即上线",
+				Href:  "https://pages.lssl.work/",
+			},
+			{
+				Name:  "lssl",
+				Title: "lssl.work",
+				Desc:  "主站入口",
+				Href:  "https://lssl.work/",
+			},
+			{
+				Name:  "pingpang",
+				Title: "乒乓球小程序",
+				Desc:  "微信小程序 · my-pingpang",
+				Href:  "https://github.com/cool-sai/my-pingpang",
+			},
+			{
+				Name:  "news",
+				Title: "news.lssl.work",
+				Desc:  "每日晨报",
+				Href:  "https://news.lssl.work/",
+			},
+			{
+				Name:  "board",
+				Title: "Board",
+				Desc:  "看板 + MCP",
+				Href:  "https://lssl.work/board/",
+			},
 		},
 	}), nil
 }
