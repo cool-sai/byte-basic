@@ -1,8 +1,5 @@
 name: golang
 
-include:
-  - path: projects/board/compose.yml
-
 services:
   consul:
     build:
