@@ -1,9 +1,13 @@
 import { ExternalLink } from "lucide-react"
+import type { Components } from "react-markdown"
 import ReactMarkdown from "react-markdown"
+import remarkDirective from "remark-directive"
 import remarkGfm from "remark-gfm"
 import { SectionTitle } from "@/shared/layout"
 import { EmptyState } from "@/shared/states"
 import { Card } from "@/shared/ui/card"
+import { remarkRenderDirective } from "./remark-render-directive"
+import { BoardTemplateRender } from "./template-render"
 import { markdownOf, type GenericDetailData, type GenericSection } from "./types"
 
 const mdClass = [
@@ -28,6 +32,12 @@ const mdClass = [
   "[&_del]:text-muted-foreground [&_del]:line-through",
   "[&_input]:mr-2",
 ].join(" ")
+
+const mdComponents = {
+  "board-template-render": BoardTemplateRender,
+} as Components & {
+  "board-template-render": typeof BoardTemplateRender
+}
 
 function SectionsBody({ sections }: { sections: GenericSection[] }) {
   const nonempty = sections.filter((s) => (s.items?.length ?? 0) > 0)
@@ -64,13 +74,18 @@ function SectionsBody({ sections }: { sections: GenericSection[] }) {
   )
 }
 
-/** 详情正文：md/content → GFM；否则 sections[]；再否则 summary / 空。 */
+/** 详情正文：md/content → GFM + :::render；否则 sections[]；再否则 summary / 空。 */
 export function DetailBody({ data }: { data?: GenericDetailData }) {
   const md = markdownOf(data)
   if (md) {
     return (
       <div className={mdClass}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkDirective, remarkRenderDirective]}
+          components={mdComponents}
+        >
+          {md}
+        </ReactMarkdown>
       </div>
     )
   }
