@@ -8,7 +8,7 @@ import { EmptyState } from "@/shared/states"
 import { Card } from "@/shared/ui/card"
 import { remarkRenderDirective } from "./remark-render-directive"
 import { BoardTemplateRender } from "./template-render"
-import { markdownOf, type GenericDetailData, type GenericSection } from "./types"
+import { detailMarkdown, type GenericDetailData, type GenericSection } from "./types"
 
 const mdClass = [
   "prose-board text-sm leading-relaxed text-foreground",
@@ -74,9 +74,17 @@ function SectionsBody({ sections }: { sections: GenericSection[] }) {
   )
 }
 
-/** 详情正文：md/content → GFM + :::render；否则 sections[]；再否则 summary / 空。 */
-export function DetailBody({ data }: { data?: GenericDetailData }) {
-  const md = markdownOf(data)
+/** 详情正文：md/content → GFM + :::render；templates 无 md 时默认挂 preview；否则 sections / summary。 */
+export function DetailBody({
+  data,
+  moduleSlug = "",
+  detailSlug = "",
+}: {
+  data?: GenericDetailData
+  moduleSlug?: string
+  detailSlug?: string
+}) {
+  const md = detailMarkdown(data, moduleSlug, detailSlug)
   if (md) {
     return (
       <div className={mdClass}>

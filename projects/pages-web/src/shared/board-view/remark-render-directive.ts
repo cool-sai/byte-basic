@@ -22,6 +22,7 @@ function extractText(node: unknown): string {
 
 /**
  * :::render{template="name"} …JSON… :::
+ * :::render{template="preview" of="steps"} …可选 mock JSON… :::
  * → board-template-render；JSON 留在 children 文本，不进 HTML 属性。
  */
 export const remarkRenderDirective: Plugin<[], Root> = () => {
@@ -35,10 +36,11 @@ export const remarkRenderDirective: Plugin<[], Root> = () => {
         return
       }
       const template = String(d.attributes?.template ?? "").trim()
+      const of = String(d.attributes?.of ?? "").trim()
       const context = extractText(d).trim()
       const data = d.data ?? (d.data = {})
       data.hName = "board-template-render"
-      data.hProperties = { template }
+      data.hProperties = of ? { template, of } : { template }
       // 直接文本子节点，避免 HTML attr 转义破坏 JSON
       d.children = context ? [{ type: "text", value: context }] : []
     })

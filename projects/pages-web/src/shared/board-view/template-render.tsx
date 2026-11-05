@@ -1,25 +1,38 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { api } from "@/shared/lib/api"
-import { mustacheSanitize } from "./mustache-html"
+import { mustacheSanitize, parseMockContext } from "./mustache-html"
 
 /** 本页生命周期内缓存模板 HTML（按 slug）。 */
 const templateCache = new Map<string, Promise<string>>()
 
+type TemplateNodeData = { html?: unknown; mock?: unknown }
+
 function loadTemplateHtml(name: string): Promise<string> {
   const hit = templateCache.get(name)
   if (hit) return hit
-  const p = api
-    .detail<{ html?: unknown }>("templates", name)
-    .then((res) => {
-      const html = res.detail?.data?.html
-      if (typeof html !== "string" || !html.trim()) {
-        throw new Error("无 data.html")
-      }
-      return html
-    })
+  const p = loadTemplateData(name).then((data) => {
+    const html = data.html
+    if (typeof html !== "string" || !html.trim()) {
+      throw new Error("无 data.html")
+    }
+    return html
+  })
   templateCache.set(name, p)
   p.catch(() => {
     templateCache.delete(name)
+  })
+  return p
+}
+
+const nodeCache = new Map<string, Promise<TemplateNodeData>>()
+
+function loadTemplateData(name: string): Promise<TemplateNodeData> {
+  const hit = nodeCache.get(name)
+  if (hit) return hit
+  const p = api.detail<TemplateNodeData>("templates", name).then((res) => res.detail?.data ?? {})
+  nodeCache.set(name, p)
+  p.catch(() => {
+    nodeCache.delete(name)
   })
   return p
 }
@@ -51,11 +64,16 @@ function parseContext(raw: string): Record<string, unknown> {
 
 type Props = {
   template?: string
+  /** 预览目标模板 slug：加载其 html/mock，填入 layout（通常 template=preview） */
+  of?: string
   children?: ReactNode
 }
 
-/** 查库 HTML 模板 → Mustache 填数据 → DOMPurify → 插入（无 eval，CSP 安全）。 */
-export function BoardTemplateRender({ template = "", children }: Props) {
+/**
+ * 查库 HTML 模板 → Mustache 填数据 → DOMPurify → 插入（无 eval，CSP 安全）。
+ * 带 of 时：template 为布局（如 preview），of 为目标模板；围栏 JSON 可覆盖 of 的 data.mock。
+ */
+export function BoardTemplateRender({ template = "", of: ofProp = "", children }: Props) {
   const context = useMemo(() => childrenToText(children), [children])
   const [html, setHtml] = useState<string | null>(null)
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading")
@@ -69,6 +87,7 @@ export function BoardTemplateRender({ template = "", children }: Props) {
 
     void (async () => {
       const name = template.trim()
+      const ofName = ofProp.trim()
       if (!name) {
         if (!cancelled) {
           setStatus("error")
@@ -77,9 +96,30 @@ export function BoardTemplateRender({ template = "", children }: Props) {
         return
       }
       try {
-        const tpl = await loadTemplateHtml(name)
-        const ctx = parseContext(context)
-        const clean = mustacheSanitize(tpl, ctx)
+        let clean: string
+        if (ofName) {
+          if (ofName === name) {
+            throw new Error("of 不能与 template 相同")
+          }
+          const [layout, target] = await Promise.all([loadTemplateHtml(name), loadTemplateData(ofName)])
+          const fence = parseContext(context)
+          const mock =
+            Object.keys(fence).length > 0 ? fence : parseMockContext(target.mock)
+          const source = typeof target.html === "string" ? target.html : ""
+          if (!source.trim()) throw new Error(`模板「${ofName}」无 data.html`)
+          const effect = mustacheSanitize(source, mock)
+          const layoutCtx: Record<string, unknown> = {
+            of: ofName,
+            mock_json: JSON.stringify(mock, null, 2),
+            html: source,
+            effect,
+          }
+          clean = mustacheSanitize(layout, layoutCtx)
+        } else {
+          const tpl = await loadTemplateHtml(name)
+          const ctx = parseContext(context)
+          clean = mustacheSanitize(tpl, ctx)
+        }
         if (!cancelled) {
           setHtml(clean)
           setStatus("ok")
@@ -96,7 +136,7 @@ export function BoardTemplateRender({ template = "", children }: Props) {
     return () => {
       cancelled = true
     }
-  }, [template, context])
+  }, [template, ofProp, context])
 
   if (status === "loading") {
     return <p className="my-2 text-sm text-muted-foreground">加载模板…</p>

@@ -10,13 +10,9 @@ export interface GenericDetailData {
   content?: string
   /** 旧 life 形分区（无 md/content 时兜底） */
   sections?: GenericSection[]
-}
-
-/** module=templates 的 detail.data：Mustache HTML + 预览 mock。 */
-export interface TemplateDetailData extends GenericDetailData {
-  /** Mustache HTML 源码 */
+  /** templates：Mustache HTML（:::render 拉取） */
   html?: string
-  /** 详情页预览用上下文（对象，或 JSON 字符串）；缺省按 {} */
+  /** templates：详情预览默认 mock；缺省 {} */
   mock?: unknown
 }
 
@@ -43,5 +39,28 @@ export function markdownOf(data: GenericDetailData | undefined): string | null {
   if (!data) return null
   if (typeof data.md === "string" && data.md.trim()) return data.md
   if (typeof data.content === "string" && data.content.trim()) return data.content
+  return null
+}
+
+/**
+ * templates 模块下：无 md/content 但有 data.html 时，默认挂 preview 模板，
+ * 走 :::render 展示 Mock / 模板源码 / 渲染效果（不另起专用详情 UI）。
+ */
+export function detailMarkdown(
+  data: GenericDetailData | undefined,
+  moduleSlug: string,
+  detailSlug: string,
+): string | null {
+  const md = markdownOf(data)
+  if (md) return md
+  if (
+    moduleSlug === "templates" &&
+    detailSlug &&
+    detailSlug !== "preview" &&
+    typeof data?.html === "string" &&
+    data.html.trim()
+  ) {
+    return `:::render{template="preview" of="${detailSlug}"}\n:::\n`
+  }
   return null
 }

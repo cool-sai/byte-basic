@@ -120,7 +120,7 @@ put_node
     description: 详情 :::render 用的 HTML 片段
 ```
 
-每个模板是一条 detail，slug = 模板名，HTML 放在 `data.html`：
+每个业务模板是一条 detail，slug = 模板名，Mustache HTML 放在 `data.html`；可选 `data.mock` 供详情预览：
 
 ```
 put_node
@@ -129,8 +129,8 @@ put_node
   slug: steps
   title: 步骤列表
   data:
-    summary: 卡片式步骤条（Mustache）   # 可选；列表/详情顶栏摘要
-    mock:                                # 可选；模板详情页预览用；缺省按 {}
+    summary: 卡片式步骤条（Mustache）   # 可选
+    mock:                                # 可选；详情预览默认上下文，缺省 {}
       items:
         - n: 1
           title: 拉代码
@@ -148,7 +148,49 @@ put_node
       </ol>
 ```
 
-`templates` 模块的详情页（`/templates/detail.html?slug=…`）固定三块：**Mock 数据**（`data.mock`，缺省 `{}`）→ **模板**（`data.html` 源码）→ **渲染效果**（同生产路径：Mustache + DOMPurify）。`:::render` 仍用 MD 里 ```json 围栏传上下文，不读 `data.mock`。
+### 模板详情预览（`preview` + `:::render`）
+
+不另做专用详情壳。在 `templates` 里放一条布局模板 `preview`（`data.html` 画三块），详情走通用 MD → `:::render`：
+
+```
+put_node
+  type: detail
+  module: templates
+  slug: preview
+  title: 模板预览布局
+  data:
+    summary: 挂 of=业务模板，展示 Mock / 源码 / 渲染效果
+    html: |
+      <div class="board-tpl-preview" style="display:flex;flex-direction:column;gap:24px">
+        <section>
+          <h2 style="font-size:14px;font-weight:600;opacity:.7;margin:0 0 8px">Mock 数据</h2>
+          <pre style="margin:0;padding:14px 16px;border:1px solid rgba(127,127,127,.28);border-radius:12px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word">{{mock_json}}</pre>
+        </section>
+        <section>
+          <h2 style="font-size:14px;font-weight:600;opacity:.7;margin:0 0 8px">模板</h2>
+          <pre style="...同上...">{{html}}</pre>
+        </section>
+        <section>
+          <h2 style="font-size:14px;font-weight:600;opacity:.7;margin:0 0 8px">渲染效果</h2>
+          <div style="padding:14px 16px;border:1px solid rgba(127,127,127,.28);border-radius:12px">{{{effect}}}</div>
+        </section>
+      </div>
+```
+
+挂法（可写在任意详情的 `data.md`）：
+
+````
+:::render{template="preview" of="steps"}
+```json
+{"items":[{"n":1,"title":"拉代码","detail":"clone"}]}
+```
+:::
+````
+
+- `of` = 要预览的业务模板 slug（加载其 `data.html`；围栏 JSON 有内容则作 mock，否则用该节点 `data.mock`，再否则 `{}`）
+- 壳把 mock 填进目标模板得到 `effect`（Mustache + DOMPurify），再填进 `preview` 布局的 `mock_json` / `html` / `effect`
+- **约定**：`templates` 下业务模板若无 `data.md`/`content` 但有 `data.html`，详情默认等价于 `:::render{template="preview" of="<本 slug>"}`（仍走同一 render 链路）
+- `of` 不可与 `template` 相同；不要给 `preview` 自己写 `data.html` 业务片段当可挂目标（可预览其它 slug）
 
 循环 / 条件用 [Mustache](https://mustache.github.io/mustache.5.html)（**不是** Handlebars）：
 
