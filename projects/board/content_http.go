@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"mime"
-	"net"
 	"net/http"
 	"os"
 	"path"
@@ -13,9 +12,11 @@ import (
 
 // contentConfig 来自环境变量：
 //
-//	PAGES_HOST        页面专用域名（如 pages.lssl.work）。设置后 /pages/ 只在该域名下提供，主域名访问会被重定向过去。
+//	PAGES_HOST        页面专用域名（如 pages.lssl.work）。设置后主站 /pages/ 重定向到该域名；页面本体由 pages-web/TLB 托管。
 //	PAGES_API_ORIGIN  页面 JS 允许 fetch 的读接口源，写进 CSP connect-src，默认 https://lssl.work。
 //	PAGES_EXTRA_SRC   额外允许的脚本/样式/字体来源（空格分隔，例如 https://cdn.jsdelivr.net），默认无。
+//
+// Host 隔离（pages 域名不暴露 MCP/token）是 TLB 的职责，board 只按路径挂 handler。
 type contentConfig struct {
 	PagesHost string
 	APIOrigin string
@@ -55,28 +56,6 @@ func (c contentConfig) pageCSP() string {
 		csp += "; sandbox allow-scripts"
 	}
 	return csp
-}
-
-func requestHost(r *http.Request) string {
-	h := r.Host
-	if hh, _, err := net.SplitHostPort(h); err == nil {
-		h = hh
-	}
-	return strings.ToLower(h)
-}
-
-// withPagesHost：请求打到页面专用域名时只交给页面处理器，绝不暴露 /mcp、/api/tokens 等。
-func withPagesHost(cfg contentConfig, main, pages http.Handler) http.Handler {
-	if cfg.PagesHost == "" {
-		return main
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if requestHost(r) == cfg.PagesHost {
-			pages.ServeHTTP(w, r)
-			return
-		}
-		main.ServeHTTP(w, r)
-	})
 }
 
 func readCORS(next http.HandlerFunc) http.HandlerFunc {
@@ -197,7 +176,9 @@ func typedNode(w http.ResponseWriter, r *http.Request, c ContentStore, typ strin
 	return n, true
 }
 
-// pagesHandler 是页面专用域名下的处理器：只允许 GET/HEAD 读页面文件。
+// pagesHandler serves uploaded pages at / and /{path} (GET/HEAD only).
+// Not wired from newContentMux anymore — production pages host is TLB → pages-web;
+// kept for unit tests of nav / page CSP until that path is fully retired.
 func pagesHandler(c ContentStore, cfg contentConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
