@@ -20,7 +20,7 @@ function extractText(node: unknown): string {
 
 /**
  * :::render{template="name"} …JSON… :::
- * → custom hast element board-template-render for ReactMarkdown components.
+ * → board-template-render；JSON 留在 children 文本，不进 HTML 属性。
  */
 export const remarkRenderDirective: Plugin<[], Root> = () => {
   return (tree) => {
@@ -36,8 +36,9 @@ export const remarkRenderDirective: Plugin<[], Root> = () => {
       const context = extractText(d).trim()
       const data = d.data ?? (d.data = {})
       data.hName = "board-template-render"
-      data.hProperties = { template, context }
-      d.children = []
+      data.hProperties = { template }
+      // 直接文本子节点，避免 HTML attr 转义破坏 JSON
+      d.children = context ? [{ type: "text", value: context }] : []
     })
   }
 }
