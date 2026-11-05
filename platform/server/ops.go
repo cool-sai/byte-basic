@@ -1104,7 +1104,11 @@ func (s *server) runDeploy(id int64, app deployApp, ver, src, label string, live
 		return
 	}
 	projectDir := s.composeProjectDir(label, app.ScmName)
-	fmt.Fprintf(live, "$ docker compose -f %s/docker-compose.yml up --no-deps --force-recreate -d %s\n", projectDir, strings.Join(app.Compose, " "))
+	envFileFlag := ""
+	if envArgs := s.composeEnvFileArgs(); len(envArgs) == 2 {
+		envFileFlag = " --env-file " + envArgs[1]
+	}
+	fmt.Fprintf(live, "$ docker compose%s -f %s/docker-compose.yml up --no-deps --force-recreate -d %s\n", envFileFlag, projectDir, strings.Join(app.Compose, " "))
 	replacesSelf := false
 	for _, svc := range app.Compose {
 		if svc == "platform" {
@@ -1254,11 +1258,24 @@ func (s *server) composeCmd(args ...string) *exec.Cmd {
 	return s.composeCmdDir(s.root, args...)
 }
 
+// composeEnvFileArgs returns --env-file for the project-root .env when present
+// (container: /work/.env, host: e.g. /opt/byte-basic/.env) so ${VAR} in compose
+// interpolate even when projectDir is scm-work/<app> with no local .env.
+func (s *server) composeEnvFileArgs() []string {
+	envPath := filepath.Join(s.root, ".env")
+	if fileExists(envPath) {
+		return []string{"--env-file", envPath}
+	}
+	return nil
+}
+
 func (s *server) composeCmdDir(projectDir string, args ...string) *exec.Cmd {
 	if projectDir == "" {
 		projectDir = s.root
 	}
-	prefix := append([]string{"compose", "--project-directory", projectDir}, s.composeFileArgs(projectDir)...)
+	prefix := []string{"compose", "--project-directory", projectDir}
+	prefix = append(prefix, s.composeEnvFileArgs()...)
+	prefix = append(prefix, s.composeFileArgs(projectDir)...)
 	cmd := exec.Command("docker", append(prefix, args...)...)
 	cmd.Dir = projectDir
 	host := s.hostRoot()
@@ -1345,7 +1362,9 @@ func (s *server) composeSidecar(w io.Writer, projectDir string, args ...string) 
 		projectDir = s.root
 	}
 	fmt.Fprintf(w, "$ docker run --rm compose-sidecar HOST_ROOT=%s -w %s\n", root, projectDir)
-	composeArgs := append([]string{"compose", "--project-directory", projectDir}, s.composeFileArgs(projectDir)...)
+	composeArgs := []string{"compose", "--project-directory", projectDir}
+	composeArgs = append(composeArgs, s.composeEnvFileArgs()...)
+	composeArgs = append(composeArgs, s.composeFileArgs(projectDir)...)
 	composeArgs = append(composeArgs, args...)
 	// Sidecar must see docker.sock + HOST_ROOT paths for ${HOST_ROOT} binds,
 	// and scm-work named volume when projectDir is under /work/scm-work.
