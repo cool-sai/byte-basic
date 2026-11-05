@@ -214,10 +214,35 @@ func pagesHandler(c ContentStore, cfg contentConfig) http.Handler {
 	})
 }
 
-// servePage 把 rest（如 finance/drawdown/app.js）拆成「页面路径 + 文件名」，取 current 版本。
 // homePagePath：pages 域名根路径展示的上传页面。
 const homePagePath = "home"
 
+// shellFallbackSkip：这些 URL 第一段不做 _shell 回落（专属页或壳自身）。
+var shellFallbackSkip = map[string]bool{
+	homePagePath:  true,
+	shellPagePath: true,
+}
+
+func writePageBody(w http.ResponseWriter, r *http.Request, cfg contentConfig, name, body string) {
+	ct := mime.TypeByExtension(path.Ext(name))
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	h := w.Header()
+	h.Set("Content-Type", ct)
+	h.Set("Content-Security-Policy", cfg.pageCSP())
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("Cache-Control", "no-cache")
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write([]byte(body))
+}
+
+// servePage 把 rest（如 finance/drawdown/app.js）拆成「页面路径 + 文件名」，取 current 版本。
+// 精确 path 未命中时：若第一段非保留名，回落到 page path=_shell 的同名文件（地址仍是 /{module}/，相对资源可用）。
 func servePage(w http.ResponseWriter, r *http.Request, c ContentStore, cfg contentConfig, rest string) {
 	trailing := rest == "" || strings.HasSuffix(rest, "/")
 	segs := strings.Split(strings.Trim(rest, "/"), "/")
@@ -225,6 +250,7 @@ func servePage(w http.ResponseWriter, r *http.Request, c ContentStore, cfg conte
 		http.NotFound(w, r)
 		return
 	}
+	foundPage := false
 	for k := min(len(segs), maxPageDepth); k >= 1; k-- {
 		p, err := cleanPagePath(strings.Join(segs[:k], "/"))
 		if err != nil {
@@ -238,6 +264,7 @@ func servePage(w http.ResponseWriter, r *http.Request, c ContentStore, cfg conte
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		foundPage = true
 		name := strings.Join(segs[k:], "/")
 		if name == "" {
 			if !trailing {
@@ -253,22 +280,35 @@ func servePage(w http.ResponseWriter, r *http.Request, c ContentStore, cfg conte
 		if !ok {
 			break
 		}
-		ct := mime.TypeByExtension(path.Ext(name))
-		if ct == "" {
-			ct = "application/octet-stream"
-		}
-		h := w.Header()
-		h.Set("Content-Type", ct)
-		h.Set("Content-Security-Policy", cfg.pageCSP())
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Cache-Control", "no-cache")
-		if r.Method == http.MethodHead {
+		writePageBody(w, r, cfg, name, body)
+		return
+	}
+	if foundPage {
+		http.NotFound(w, r)
+		return
+	}
+	first := segs[0]
+	if first != "" && !shellFallbackSkip[first] {
+		files, err := c.PageFiles(shellPagePath)
+		if err != nil && !errors.Is(err, errNotFound) {
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		_, _ = w.Write([]byte(body))
-		return
+		if err == nil {
+			name := strings.Join(segs[1:], "/")
+			if name == "" {
+				if !trailing {
+					w.Header().Set("Location", first+"/")
+					w.WriteHeader(http.StatusMovedPermanently)
+					return
+				}
+				name = "index.html"
+			}
+			if body, ok := files[name]; ok {
+				writePageBody(w, r, cfg, name, body)
+				return
+			}
+		}
 	}
 	http.NotFound(w, r)
 }

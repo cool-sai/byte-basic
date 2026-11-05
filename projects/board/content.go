@@ -178,9 +178,16 @@ const (
 	maxPageBytes = 4 << 20
 )
 
+// shellPagePath：通用模块壳的 put_page 路径；段名以下划线开头，普通路径正则不允许，故单独放行。
+const shellPagePath = "_shell"
+
 // cleanPagePath：1~4 段，每段小写字母数字 _ -，例如 finance/drawdown。
+// 例外：整路径恰好为 shellPagePath（通用壳回落用）。
 func cleanPagePath(p string) (string, error) {
 	p = strings.Trim(strings.TrimSpace(p), "/")
+	if p == shellPagePath {
+		return p, nil
+	}
 	segs := strings.Split(p, "/")
 	if p == "" || len(segs) > maxPageDepth {
 		return "", fmt.Errorf("页面路径需 1~%d 段: %q", maxPageDepth, p)
