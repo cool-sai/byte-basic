@@ -1,4 +1,4 @@
-import Handlebars from "handlebars"
+import Mustache from "mustache"
 import DOMPurify from "isomorphic-dompurify"
 import { useEffect, useState } from "react"
 import { api } from "@/shared/lib/api"
@@ -45,7 +45,7 @@ type Props = {
   children?: unknown
 }
 
-/** 查库 HTML 模板 → Handlebars 填数据 → DOMPurify → 插入。 */
+/** 查库 HTML 模板 → Mustache 填数据 → DOMPurify → 插入（无 eval，CSP 安全）。 */
 export function BoardTemplateRender({ template = "", context = "" }: Props) {
   const [html, setHtml] = useState<string | null>(null)
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading")
@@ -69,8 +69,9 @@ export function BoardTemplateRender({ template = "", context = "" }: Props) {
       try {
         const tpl = await loadTemplateHtml(name)
         const ctx = parseContext(context)
-        const compiled = Handlebars.compile(tpl)(ctx)
-        const clean = DOMPurify.sanitize(compiled)
+        // Mustache 走 token walk，不用 new Function / eval
+        const rendered = Mustache.render(tpl, ctx)
+        const clean = DOMPurify.sanitize(rendered)
         if (!cancelled) {
           setHtml(clean)
           setStatus("ok")
