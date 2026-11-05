@@ -13,6 +13,8 @@ type DirectiveNode = {
 function extractText(node: unknown): string {
   if (!node || typeof node !== "object") return ""
   const n = node as { type?: string; value?: string; children?: unknown[] }
+  // fenced code inside :::render keeps JSON intact
+  if (n.type === "code" && typeof n.value === "string") return n.value
   if (n.type === "text" && typeof n.value === "string") return n.value
   if (Array.isArray(n.children)) return n.children.map(extractText).join("")
   return ""

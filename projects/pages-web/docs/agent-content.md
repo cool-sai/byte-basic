@@ -151,11 +151,15 @@ put_node
 
 ### 在详情 Markdown 里引用
 
-```
+JSON 上下文请放进 **代码围栏**（推荐 `json` fence）。裸写 `{"n":1}` 时，`:1` 会被 remark-directive 当成文本指令吃掉，JSON 会坏。
+
+````
 :::render{template="steps"}
+```json
 {"items":[{"title":"拉代码","detail":"clone"},{"title":"测试"},{"title":"部署"}]}
-:::
 ```
+:::
+````
 
 - `template` = `templates` 模块下 detail 的 slug
 - 围栏正文 = 可选 **JSON 对象**，作为 Mustache 上下文；空正文或省略正文则用 `{}`
@@ -174,3 +178,18 @@ put_node
 - 在线 HTML 组件库、按 module 换列表/详情组件
 - 详情页用户互动写回（打分、加运动员）
 - board `_shell` 回落合并上线后，可删掉各模块 path 上重复的 put_page（只留 `_shell`）
+
+
+## `:::render` 上下文
+
+JSON 里的 `:数字`（冒号紧贴名字）会被 remark-directive 当成文本指令吃掉。**只认代码围栏**，不要裸写 JSON：
+
+````md
+:::render{template="steps"}
+```json
+{"items":[{"n":1,"title":"拉代码"}]}
+```
+:::
+````
+
+裸 `{"n":1}` 会解析失败；围栏内不走 directive 规则。
