@@ -12,8 +12,12 @@ type DirectiveNode = {
 
 function extractText(node: unknown): string {
   if (!node || typeof node !== "object") return ""
-  const n = node as { type?: string; value?: string; children?: unknown[] }
+  const n = node as { type?: string; value?: string; name?: string; children?: unknown[] }
+  // fenced code inside :::render keeps JSON intact
+  if (n.type === "code" && typeof n.value === "string") return n.value
   if (n.type === "text" && typeof n.value === "string") return n.value
+  // remark-directive treats ":1" in {"n":1} as textDirective — restore ":name"
+  if (n.type === "textDirective" && typeof n.name === "string") return `:${n.name}`
   if (Array.isArray(n.children)) return n.children.map(extractText).join("")
   return ""
 }
