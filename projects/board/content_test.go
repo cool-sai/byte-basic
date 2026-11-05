@@ -106,10 +106,13 @@ func TestListChildrenPaging(t *testing.T) {
 }
 
 func TestPageValidation(t *testing.T) {
-	for _, p := range []string{"", "/", "A/b", "a/../b", "a/b/c/d/e", "a b"} {
+	for _, p := range []string{"", "/", "A/b", "a/../b", "a/b/c/d/e", "a b", "_assets", "_nope"} {
 		if _, err := cleanPagePath(p); err == nil {
 			t.Fatalf("path %q should fail", p)
 		}
+	}
+	if got, err := cleanPagePath(shellPagePath); err != nil || got != shellPagePath {
+		t.Fatalf("shell path: %q %v", got, err)
 	}
 	for _, f := range []string{"../x", "/etc/passwd", "a//b", "a/./b", ".env", "a\\b", "a/b/c/d"} {
 		if _, err := cleanPageFileName(f); err == nil {
@@ -247,6 +250,70 @@ func TestPagesOnSameHostAreSandboxed(t *testing.T) {
 	}
 	if res, _ := http.Get(srv.URL + "/pages/finance/drawdown/missing.js"); res.StatusCode != 404 {
 		t.Fatalf("missing file %d", res.StatusCode)
+	}
+}
+
+func TestShellPageFallback(t *testing.T) {
+	srv, c := contentServer(t, contentConfig{PagesHost: "pages.example", APIOrigin: "https://api.example"})
+	do := func(path string) *http.Response {
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		req.Host = "pages.example"
+		res, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	bodyOf := func(res *http.Response) string {
+		b, _ := io.ReadAll(res.Body)
+		return string(b)
+	}
+
+	// 都没有 → 404
+	if r := do("/life/"); r.StatusCode != 404 {
+		t.Fatalf("no shell no page -> %d", r.StatusCode)
+	}
+
+	_, _ = c.PutPage(shellPagePath, map[string]string{
+		"index.html":  "SHELL_INDEX",
+		"detail.html": "SHELL_DETAIL",
+		"assets/a.js": "SHELL_JS",
+	})
+
+	// 无专属页 → 回落 _shell；浏览器地址仍是 /life/
+	if r := do("/life/"); r.StatusCode != 200 || bodyOf(r) != "SHELL_INDEX" {
+		t.Fatalf("shell fallback index %d %q", r.StatusCode, bodyOf(r))
+	}
+	if r := do("/life/detail.html"); r.StatusCode != 200 || bodyOf(r) != "SHELL_DETAIL" {
+		t.Fatalf("shell fallback detail %d %q", r.StatusCode, bodyOf(r))
+	}
+	if r := do("/life/assets/a.js"); r.StatusCode != 200 || bodyOf(r) != "SHELL_JS" {
+		t.Fatalf("shell fallback asset %d %q", r.StatusCode, bodyOf(r))
+	}
+	if r := do("/life"); r.StatusCode != 301 || r.Header.Get("Location") != "life/" {
+		t.Fatalf("shell trailing slash %d %s", r.StatusCode, r.Header.Get("Location"))
+	}
+
+	// 有专属页 → 用专属，不用 shell
+	_, _ = c.PutPage("life", map[string]string{"index.html": "LIFE_INDEX", "only-life.js": "1"})
+	if r := do("/life/"); r.StatusCode != 200 || bodyOf(r) != "LIFE_INDEX" {
+		t.Fatalf("dedicated wins %d %q", r.StatusCode, bodyOf(r))
+	}
+	// 专属页缺文件 → 404（不回落 shell）
+	if r := do("/life/detail.html"); r.StatusCode != 404 {
+		t.Fatalf("dedicated missing file should 404, got %d", r.StatusCode)
+	}
+
+	// 保留名 home / _shell 不做回落冒充
+	if r := do("/home/missing.html"); r.StatusCode != 404 {
+		t.Fatalf("home skip fallback %d", r.StatusCode)
+	}
+	if r := do("/_shell/"); r.StatusCode != 200 || bodyOf(r) != "SHELL_INDEX" {
+		t.Fatalf("direct _shell %d %q", r.StatusCode, bodyOf(r))
+	}
+
+	if _, err := cleanPagePath(shellPagePath); err != nil {
+		t.Fatalf("cleanPagePath(_shell): %v", err)
 	}
 }
 
