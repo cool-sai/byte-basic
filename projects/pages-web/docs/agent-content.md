@@ -107,7 +107,7 @@ src/shared/board-view/  真正的列表/详情逻辑
 
 ## HTML 模板（:::render）
 
-详情 Markdown 里可用 directive 拉取 **module=`templates`** 下的 HTML 片段，用 Handlebars 填数据后消毒插入（**会剥掉 `<script>` 等**）。
+详情 Markdown 里可用 directive 拉取 **module=`templates`** 下的 HTML 片段，用 **Mustache** 填数据后消毒插入（**会剥掉 `<script>` 等**）。Mustache 解释模板、不走 `eval`/`new Function`，兼容 CSP（无 `unsafe-eval`）。
 
 ### 写模板（存库）
 
@@ -131,13 +131,21 @@ put_node
   data:
     html: |
       <ol class="board-steps">
-      {{#each items}}
-        <li>{{title}}</li>
-      {{/each}}
+      {{#items}}
+        <li><strong>{{title}}</strong>{{#detail}} — {{.}}{{/detail}}</li>
+      {{/items}}
+      {{^items}}
+        <li>暂无步骤</li>
+      {{/items}}
       </ol>
 ```
 
-循环 / 条件用 [Handlebars](https://handlebarsjs.com/)：`{{#each items}}…{{/each}}`、`{{#if}}`、`{{title}}`（默认转义）。需要原样 HTML 时用三花括号 `{{{html}}}`（仍会再过 DOMPurify）。
+循环 / 条件用 [Mustache](https://mustache.github.io/mustache.5.html)（**不是** Handlebars）：
+
+- 循环：`{{#items}}…{{title}}…{{/items}}`（数组节；不要写 `{{#each items}}`）
+- 条件（真值 / 非空）：`{{#detail}}…{{/detail}}`；节内当前值用 `{{.}}`
+- 否定 / 空列表：`{{^items}}…{{/items}}`
+- 插值：`{{title}}`（默认转义）；原样 HTML 用 `{{{html}}}`（仍会再过 DOMPurify）
 
 壳请求：`GET /api/data/templates/<slug>?include=data`（与其它模块相同）。
 
@@ -145,12 +153,12 @@ put_node
 
 ```
 :::render{template="steps"}
-{"items":[{"title":"拉代码"},{"title":"测试"},{"title":"部署"}]}
+{"items":[{"title":"拉代码","detail":"clone"},{"title":"测试"},{"title":"部署"}]}
 :::
 ```
 
 - `template` = `templates` 模块下 detail 的 slug
-- 围栏正文 = 可选 **JSON 对象**，作为 Handlebars 上下文；空正文或省略正文则用 `{}`
+- 围栏正文 = 可选 **JSON 对象**，作为 Mustache 上下文；空正文或省略正文则用 `{}`
 - 加载中 / 找不到模板 / JSON 无效：详情页显示一行灰色提示，不整页崩溃
 - 同一页内同名模板只拉一次（内存缓存）
 
