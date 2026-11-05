@@ -1,0 +1,20 @@
+# pages.lssl.work 静态站。静态文件来自宿主机 /srv/pages（同步 cool-sai/pages 的 dist/home + dist/shell）。
+# TLB：把 pages.lssl.work 上游从 board:8090 改到本服务 :80。
+services:
+  pages-web:
+    build:
+      context: ../..
+      dockerfile: projects/pages-web/Dockerfile
+    image: minikitex-pages-web:local
+    hostname: pages-web
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - /srv/pages/home:/usr/share/nginx/html/home:ro
+      - /srv/pages/shell:/usr/share/nginx/html/shell:ro
+    expose:
+      - "80"
+    depends_on:
+      - board
+    restart: unless-stopped
+    pull_policy: never

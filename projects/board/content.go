@@ -32,7 +32,7 @@ var (
 	errConflict = errors.New("conflict")
 )
 
-// reservedModuleSlugs：会和 /api/v2/{module} 路由撞名的模块名。
+// reservedModuleSlugs：会和 /data/{module}、/api/v2/{module} 路由撞名的模块名。
 var reservedModuleSlugs = map[string]bool{"modules": true}
 
 func checkModuleSlug(typ, slug string) error {

@@ -55,7 +55,7 @@ const contentInstructions = `
 
 内容树（v2，两级）：module（模块，如 finance）→ detail（详情，如一次推送）→ block（区块，如 conclusion）。每个节点的 data 是任意 JSON，带 schema_version。
 写：put_node（按 父节点+slug 幂等覆盖，返回 id；父节点可用 parent_id，或按名字 module / module+detail）、update_node、delete_node（软删除整棵子树）、list_nodes、get_node。
-读接口（公开、只读，页面 JS 用，全部按名字）：/board/api/v2/modules（全部模块）、/{module}?page=&size=（模块下的详情，不含区块）、/{module}/{slug}?include=data（详情 + 全部区块，一次拿全）、/{module}/{slug}/blocks/{block}（单个区块）。
+读接口（公开、只读，页面 JS 用，全部按名字）：首选 /data/modules、/data/{module}、/data/{module}/{slug}?include=data、/data/{module}/{slug}/blocks/{block}（pages 同域经 nginx /api/data → /data）；过渡期 /board/api/v2/... 同语义仍可用。
 页面：put_page 上传 HTML/JS/CSS（每次一个新版本并立即上线），list_page_versions 看历史，rollback_page 切回旧版本。页面只能 fetch 上面的读接口，不能调写接口、不能嵌 iframe、不能提交表单。`
 
 func addContentTools(server *mcp.Server, c ContentStore) {
