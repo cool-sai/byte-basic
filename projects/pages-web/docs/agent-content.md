@@ -129,6 +129,14 @@ put_node
   slug: steps
   title: 步骤列表
   data:
+    summary: 卡片式步骤条（Mustache）   # 可选；列表/详情顶栏摘要
+    mock:                                # 可选；模板详情页预览用；缺省按 {}
+      items:
+        - n: 1
+          title: 拉代码
+          detail: clone
+        - n: 2
+          title: 测试
     html: |
       <ol class="board-steps">
       {{#items}}
@@ -139,6 +147,8 @@ put_node
       {{/items}}
       </ol>
 ```
+
+`templates` 模块的详情页（`/templates/detail.html?slug=…`）固定三块：**Mock 数据**（`data.mock`，缺省 `{}`）→ **模板**（`data.html` 源码）→ **渲染效果**（同生产路径：Mustache + DOMPurify）。`:::render` 仍用 MD 里 ```json 围栏传上下文，不读 `data.mock`。
 
 循环 / 条件用 [Mustache](https://mustache.github.io/mustache.5.html)（**不是** Handlebars）：
 

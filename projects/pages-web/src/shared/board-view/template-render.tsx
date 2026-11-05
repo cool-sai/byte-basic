@@ -1,7 +1,6 @@
-import Mustache from "mustache"
-import DOMPurify from "isomorphic-dompurify"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { api } from "@/shared/lib/api"
+import { mustacheSanitize } from "./mustache-html"
 
 /** 本页生命周期内缓存模板 HTML（按 slug）。 */
 const templateCache = new Map<string, Promise<string>>()
@@ -80,8 +79,7 @@ export function BoardTemplateRender({ template = "", children }: Props) {
       try {
         const tpl = await loadTemplateHtml(name)
         const ctx = parseContext(context)
-        const rendered = Mustache.render(tpl, ctx)
-        const clean = DOMPurify.sanitize(rendered)
+        const clean = mustacheSanitize(tpl, ctx)
         if (!cancelled) {
           setHtml(clean)
           setStatus("ok")

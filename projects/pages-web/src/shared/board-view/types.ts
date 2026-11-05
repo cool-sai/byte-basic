@@ -12,6 +12,14 @@ export interface GenericDetailData {
   sections?: GenericSection[]
 }
 
+/** module=templates 的 detail.data：Mustache HTML + 预览 mock。 */
+export interface TemplateDetailData extends GenericDetailData {
+  /** Mustache HTML 源码 */
+  html?: string
+  /** 详情页预览用上下文（对象，或 JSON 字符串）；缺省按 {} */
+  mock?: unknown
+}
+
 export interface GenericSection {
   key?: string
   title?: string

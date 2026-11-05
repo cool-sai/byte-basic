@@ -4,9 +4,12 @@ import { fmtTime } from "@/shared/lib/format"
 import { useAsync } from "@/shared/lib/use-async"
 import { EmptyState, ErrorState, LoadingState } from "@/shared/states"
 import { DetailBody } from "./body"
-import { moduleSlugFromPath, type GenericDetailData } from "./types"
+import { TemplateDetailBody } from "./template-detail"
+import { moduleSlugFromPath, type GenericDetailData, type TemplateDetailData } from "./types"
 
-/** 通用详情：?slug=；正文优先 Markdown，兼容 sections。 */
+const TEMPLATES_MODULE = "templates"
+
+/** 通用详情：?slug=；templates 模块展示 mock/模板/渲染三块，其它优先 Markdown。 */
 export function GenericDetailPage() {
   const moduleSlug = moduleSlugFromPath()
   const slug = queryParam("slug") ?? ""
@@ -42,6 +45,7 @@ export function GenericDetailPage() {
   const { detail } = st.data
   const d = detail.data ?? {}
   const date = typeof d.date === "string" ? d.date : ""
+  const isTemplates = moduleSlug === TEMPLATES_MODULE
 
   return (
     <PageShell
@@ -57,7 +61,7 @@ export function GenericDetailPage() {
       {d.summary && typeof d.summary === "string" && (
         <p className="mb-6 text-base text-muted-foreground">{d.summary}</p>
       )}
-      <DetailBody data={d} />
+      {isTemplates ? <TemplateDetailBody data={d as TemplateDetailData} /> : <DetailBody data={d} />}
     </PageShell>
   )
 }
