@@ -271,7 +271,23 @@ func TestPagesHostIsolation(t *testing.T) {
 	if string(body) != "ok" || strings.Contains(csp, "sandbox") || !strings.Contains(csp, "connect-src https://api.example") {
 		t.Fatalf("pages host %q %q", body, csp)
 	}
-	// 页面域名下不暴露 MCP、token 管理和读接口以外的任何东西
+	// 页面域名下放行 /data 公开只读 API（TLB /api → board 后 Host 仍是 pages）
+	mustPut(t, c, NodeInput{Type: NodeModule, Slug: "finance", Title: "理财"})
+	var mods NodePage
+	req, _ := http.NewRequest("GET", srv.URL+"/data/modules", nil)
+	req.Host = "pages.example"
+	resData, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resData.Body.Close()
+	if resData.StatusCode != 200 {
+		t.Fatalf("/data/modules on pages host -> %d", resData.StatusCode)
+	}
+	if err := json.NewDecoder(resData.Body).Decode(&mods); err != nil || mods.Total != 1 || mods.Items[0].Slug != "finance" {
+		t.Fatalf("/data/modules on pages host body %+v %v", mods, err)
+	}
+	// 页面域名下仍不暴露 MCP、token 管理、过渡期 /api/v2
 	for _, p := range []string{"/mcp", "/api/tokens", "/api/v2/modules"} {
 		if r := do("GET", "pages.example", p, map[string]string{"Authorization": "Bearer secret"}); r.StatusCode != 404 {
 			t.Fatalf("%s on pages host -> %d", p, r.StatusCode)

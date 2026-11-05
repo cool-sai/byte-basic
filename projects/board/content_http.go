@@ -66,12 +66,18 @@ func requestHost(r *http.Request) string {
 }
 
 // withPagesHost：请求打到页面专用域名时只交给页面处理器，绝不暴露 /mcp、/api/tokens 等。
+// 例外：/data 公开只读内容 API（TLB 把 /api/data 剥成 /data 后 Host 仍是 pages 域名）。
 func withPagesHost(cfg contentConfig, main, pages http.Handler) http.Handler {
 	if cfg.PagesHost == "" {
 		return main
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if requestHost(r) == cfg.PagesHost {
+			path := r.URL.Path
+			if path == "/data" || strings.HasPrefix(path, "/data/") {
+				main.ServeHTTP(w, r)
+				return
+			}
 			pages.ServeHTTP(w, r)
 			return
 		}
