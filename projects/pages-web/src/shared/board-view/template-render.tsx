@@ -25,8 +25,29 @@ function loadTemplateHtml(name: string): Promise<string> {
   return p
 }
 
-function parseContext(raw: string): Record<string, unknown> {
+function base64UrlToUtf8(b64url: string): string {
+  const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/")
+  const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4))
+  const bin = atob(b64 + pad)
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0))
+  return new TextDecoder().decode(bytes)
+}
+
+function decodeContextRaw(raw: string): string {
   const t = raw.trim()
+  if (!t) return ""
+  if (t.startsWith("b64:")) return base64UrlToUtf8(t.slice(4))
+  // legacy: HTML-attribute round-trip may turn " into &quot;
+  return t
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+}
+
+function parseContext(raw: string): Record<string, unknown> {
+  const t = decodeContextRaw(raw)
   if (!t) return {}
   try {
     const v: unknown = JSON.parse(t)

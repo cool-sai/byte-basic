@@ -10,6 +10,14 @@ type DirectiveNode = {
   data?: { hName?: string; hProperties?: Record<string, string> }
 }
 
+
+function utf8ToBase64Url(s: string): string {
+  const bytes = new TextEncoder().encode(s)
+  let bin = ""
+  for (const b of bytes) bin += String.fromCharCode(b)
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")
+}
+
 function extractText(node: unknown): string {
   if (!node || typeof node !== "object") return ""
   const n = node as { type?: string; value?: string; children?: unknown[] }
@@ -34,9 +42,11 @@ export const remarkRenderDirective: Plugin<[], Root> = () => {
       }
       const template = String(d.attributes?.template ?? "").trim()
       const context = extractText(d).trim()
+      // HTML attrs corrupt JSON quotes → encode as base64url with b64: prefix
+      const contextProp = context ? "b64:" + utf8ToBase64Url(context) : ""
       const data = d.data ?? (d.data = {})
       data.hName = "board-template-render"
-      data.hProperties = { template, context }
+      data.hProperties = { template, context: contextProp }
       d.children = []
     })
   }
