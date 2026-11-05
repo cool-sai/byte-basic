@@ -166,7 +166,8 @@ func newContentMux(admin string, board Board, tokens *TokenStore, content Conten
 	mcpH := requireBearer(mcpOK, newMCPHandler(server))
 	mux.Handle("/mcp", mcpH)
 	mux.Handle("/mcp/", mcpH)
-	return withPagesHost(cfg, mux, pagesHandler(content, cfg))
+	// Path → handler only. Host-based isolation (pages vs MCP/admin) belongs at TLB, not here.
+	return mux
 }
 
 func serveIndex(w http.ResponseWriter, _ *http.Request) {

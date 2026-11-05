@@ -38,9 +38,9 @@ func TestNodeHierarchyRules(t *testing.T) {
 	bad := []NodeInput{
 		{Type: "list", Slug: "x"}, // list 层已删除
 		{ParentID: mod.ID, Type: "list", Slug: "x"},
-		{ParentID: mod.ID, Type: NodeModule, Slug: "x"}, // module 不能有父
-		{Type: NodeDetail, Slug: "x"},                   // detail 必须有父（module）
-		{Type: NodeModule, Slug: "modules"},             // 保留模块名
+		{ParentID: mod.ID, Type: NodeModule, Slug: "x"},     // module 不能有父
+		{Type: NodeDetail, Slug: "x"},                       // detail 必须有父（module）
+		{Type: NodeModule, Slug: "modules"},                 // 保留模块名
 		{ParentID: mod.ID, Type: NodeBlock, Slug: "x"},      // block 父必须是 detail
 		{ParentID: det.ID, Type: NodeDetail, Slug: "x"},     // detail 父必须是 module
 		{ParentID: det.ID, Type: "page", Slug: "x"},         // 未知类型
@@ -250,39 +250,61 @@ func TestPagesOnSameHostAreSandboxed(t *testing.T) {
 	}
 }
 
-func TestPagesHostIsolation(t *testing.T) {
+func TestPagesHostRedirectAndData(t *testing.T) {
+	// Host isolation is TLB's job; board mux is path-only. Still: /pages/ redirects when PagesHost set,
+	// and /data works for any Host (TLB keeps pages Host when stripping /api).
 	srv, c := contentServer(t, contentConfig{PagesHost: "pages.example", APIOrigin: "https://api.example"})
-	_, _ = c.PutPage("news", map[string]string{"index.html": "ok"})
-	do := func(method, host, p string, hdr map[string]string) *http.Response {
+	mustPut(t, c, NodeInput{Type: NodeModule, Slug: "finance", Title: "理财"})
+	do := func(method, host, p string) *http.Response {
 		req, _ := http.NewRequest(method, srv.URL+p, bytes.NewReader(nil))
 		req.Host = host
-		for k, v := range hdr {
-			req.Header.Set(k, v)
-		}
 		res, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return res
 	}
-	res := do("GET", "pages.example", "/news/", nil)
+	// 主域名访问 /pages/ 重定向到独立域名（页面本体由 pages-web 托管）
+	if r := do("GET", "main.example", "/pages/news/"); r.StatusCode != 302 || r.Header.Get("Location") != "https://pages.example/news/" {
+		t.Fatalf("redirect %d %s", r.StatusCode, r.Header.Get("Location"))
+	}
+	// /data 公开只读 API：任意 Host（含 pages）都走同一 mux
+	for _, host := range []string{"pages.example", "main.example"} {
+		var mods NodePage
+		req, _ := http.NewRequest("GET", srv.URL+"/data/modules", nil)
+		req.Host = host
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StatusCode != 200 {
+			t.Fatalf("/data/modules host=%s -> %d", host, res.StatusCode)
+		}
+		if err := json.NewDecoder(res.Body).Decode(&mods); err != nil || mods.Total != 1 || mods.Items[0].Slug != "finance" {
+			res.Body.Close()
+			t.Fatalf("/data/modules host=%s body %+v %v", host, mods, err)
+		}
+		res.Body.Close()
+	}
+}
+
+func TestPageCSPAPIOrigin(t *testing.T) {
+	// pagesHandler still owns CSP for uploaded pages (tests / legacy); APIOrigin skips sandbox when PagesHost set.
+	c := newMemContent()
+	if _, err := c.PutPage("news", map[string]string{"index.html": "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(pagesHandler(c, contentConfig{PagesHost: "pages.example", APIOrigin: "https://api.example"}))
+	t.Cleanup(srv.Close)
+	res, err := http.Get(srv.URL + "/news/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
 	csp := res.Header.Get("Content-Security-Policy")
 	if string(body) != "ok" || strings.Contains(csp, "sandbox") || !strings.Contains(csp, "connect-src https://api.example") {
-		t.Fatalf("pages host %q %q", body, csp)
-	}
-	// 页面域名下不暴露 MCP、token 管理和读接口以外的任何东西
-	for _, p := range []string{"/mcp", "/api/tokens", "/api/v2/modules"} {
-		if r := do("GET", "pages.example", p, map[string]string{"Authorization": "Bearer secret"}); r.StatusCode != 404 {
-			t.Fatalf("%s on pages host -> %d", p, r.StatusCode)
-		}
-	}
-	if r := do("POST", "pages.example", "/mcp", map[string]string{"Authorization": "Bearer secret"}); r.StatusCode != 405 {
-		t.Fatalf("POST on pages host -> %d", r.StatusCode)
-	}
-	// 主域名访问 /pages/ 重定向到独立域名
-	if r := do("GET", "main.example", "/pages/news/", nil); r.StatusCode != 302 || r.Header.Get("Location") != "https://pages.example/news/" {
-		t.Fatalf("redirect %d %s", r.StatusCode, r.Header.Get("Location"))
+		t.Fatalf("pagesHandler CSP %q %q", body, csp)
 	}
 }
 
