@@ -105,6 +105,62 @@ src/shared/board-view/  真正的列表/详情逻辑
 
 旧路径重定向：`/news/daily/` → `/news/`，`/finance/digest/` → `/finance/`，`/life/daily/` → `/life/`。
 
+## HTML 模板（:::render）
+
+详情 Markdown 里可用 directive 拉取 **module=`templates`** 下的 HTML 片段，用 Handlebars 填数据后消毒插入（**会剥掉 `<script>` 等**）。
+
+### 写模板（存库）
+
+```
+put_node
+  type: module
+  slug: templates
+  title: HTML 模板
+  data:
+    description: 详情 :::render 用的 HTML 片段
+```
+
+每个模板是一条 detail，slug = 模板名，HTML 放在 `data.html`：
+
+```
+put_node
+  type: detail
+  module: templates
+  slug: steps
+  title: 步骤列表
+  data:
+    html: |
+      <ol class="board-steps">
+      {{#each items}}
+        <li>{{title}}</li>
+      {{/each}}
+      </ol>
+```
+
+循环 / 条件用 [Handlebars](https://handlebarsjs.com/)：`{{#each items}}…{{/each}}`、`{{#if}}`、`{{title}}`（默认转义）。需要原样 HTML 时用三花括号 `{{{html}}}`（仍会再过 DOMPurify）。
+
+壳请求：`GET /api/data/templates/<slug>?include=data`（与其它模块相同）。
+
+### 在详情 Markdown 里引用
+
+```
+:::render{template="steps"}
+{"items":[{"title":"拉代码"},{"title":"测试"},{"title":"部署"}]}
+:::
+```
+
+- `template` = `templates` 模块下 detail 的 slug
+- 围栏正文 = 可选 **JSON 对象**，作为 Handlebars 上下文；空正文或省略正文则用 `{}`
+- 加载中 / 找不到模板 / JSON 无效：详情页显示一行灰色提示，不整页崩溃
+- 同一页内同名模板只拉一次（内存缓存）
+
+无 body 亦可：
+
+```
+:::render{template="steps"}
+:::
+```
+
 ## 未做（二期及以后）
 
 - 在线 HTML 组件库、按 module 换列表/详情组件
