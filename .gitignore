@@ -12,3 +12,5 @@ projects/agent-web/node_modules
 projects/agent-web/dist
 projects/agent-python/.venv
 projects/agent-python/__pycache__
+projects/pages-web/node_modules
+projects/pages-web/dist

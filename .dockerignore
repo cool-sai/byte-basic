@@ -7,3 +7,5 @@ home/web/dist
 projects/agent-web/node_modules
 projects/agent-web/dist
 .git
+projects/pages-web/node_modules
+projects/pages-web/dist
