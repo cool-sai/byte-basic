@@ -1,6 +1,6 @@
 import Mustache from "mustache"
 import DOMPurify from "isomorphic-dompurify"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { api } from "@/shared/lib/api"
 
 /** 本页生命周期内缓存模板 HTML（按 slug）。 */
@@ -25,29 +25,19 @@ function loadTemplateHtml(name: string): Promise<string> {
   return p
 }
 
-function base64UrlToUtf8(b64url: string): string {
-  const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/")
-  const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4))
-  const bin = atob(b64 + pad)
-  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0))
-  return new TextDecoder().decode(bytes)
-}
-
-function decodeContextRaw(raw: string): string {
-  const t = raw.trim()
-  if (!t) return ""
-  if (t.startsWith("b64:")) return base64UrlToUtf8(t.slice(4))
-  // legacy: HTML-attribute round-trip may turn " into &quot;
-  return t
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
+function childrenToText(children: ReactNode): string {
+  if (children == null || typeof children === "boolean") return ""
+  if (typeof children === "string" || typeof children === "number") return String(children)
+  if (Array.isArray(children)) return children.map(childrenToText).join("")
+  if (typeof children === "object" && children !== null && "props" in children) {
+    const props = (children as { props?: { children?: ReactNode } }).props
+    return childrenToText(props?.children)
+  }
+  return ""
 }
 
 function parseContext(raw: string): Record<string, unknown> {
-  const t = decodeContextRaw(raw)
+  const t = raw.trim()
   if (!t) return {}
   try {
     const v: unknown = JSON.parse(t)
@@ -62,12 +52,12 @@ function parseContext(raw: string): Record<string, unknown> {
 
 type Props = {
   template?: string
-  context?: string
-  children?: unknown
+  children?: ReactNode
 }
 
 /** 查库 HTML 模板 → Mustache 填数据 → DOMPurify → 插入（无 eval，CSP 安全）。 */
-export function BoardTemplateRender({ template = "", context = "" }: Props) {
+export function BoardTemplateRender({ template = "", children }: Props) {
+  const context = useMemo(() => childrenToText(children), [children])
   const [html, setHtml] = useState<string | null>(null)
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading")
   const [message, setMessage] = useState("")
@@ -90,7 +80,6 @@ export function BoardTemplateRender({ template = "", context = "" }: Props) {
       try {
         const tpl = await loadTemplateHtml(name)
         const ctx = parseContext(context)
-        // Mustache 走 token walk，不用 new Function / eval
         const rendered = Mustache.render(tpl, ctx)
         const clean = DOMPurify.sanitize(rendered)
         if (!cancelled) {
