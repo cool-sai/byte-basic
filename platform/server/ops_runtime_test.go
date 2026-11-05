@@ -266,6 +266,56 @@ func TestComposeProjectDirAndWorkOverlay(t *testing.T) {
 	}
 }
 
+
+func TestComposeEnvFileArgs(t *testing.T) {
+	host := t.TempDir()
+	s := &server{root: host}
+	if got := s.composeEnvFileArgs(); len(got) != 0 {
+		t.Fatalf("no .env: %v", got)
+	}
+	envPath := filepath.Join(host, ".env")
+	if err := os.WriteFile(envPath, []byte("BOARD_TOKEN=test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := s.composeEnvFileArgs()
+	if len(got) != 2 || got[0] != "--env-file" || got[1] != envPath {
+		t.Fatalf("env args %v", got)
+	}
+	work := filepath.Join(host, "scm-work", "board")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "docker-compose.yml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := s.composeCmdDir(work, "up", "-d", "board")
+	args := cmd.Args
+	joined := strings.Join(args, " ")
+	want := "--env-file " + envPath
+	if !strings.Contains(joined, want) {
+		t.Fatalf("composeCmdDir missing %q in %v", want, args)
+	}
+	// after compose --project-directory <dir>, before -f
+	idxCompose, idxPD, idxEnv, idxF := -1, -1, -1, -1
+	for i, a := range args {
+		switch a {
+		case "compose":
+			idxCompose = i
+		case "--project-directory":
+			idxPD = i
+		case "--env-file":
+			idxEnv = i
+		case "-f":
+			if idxF < 0 {
+				idxF = i
+			}
+		}
+	}
+	if !(idxCompose >= 0 && idxPD > idxCompose && idxEnv > idxPD && idxF > idxEnv) {
+		t.Fatalf("arg order compose=%d pd=%d env=%d -f=%d args=%v", idxCompose, idxPD, idxEnv, idxF, args)
+	}
+}
+
 func TestDockerVolumeName(t *testing.T) {
 	if got := dockerVolumeName("/var/lib/docker/volumes/golang_scm-work/_data"); got != "golang_scm-work" {
 		t.Fatalf("got %q", got)
