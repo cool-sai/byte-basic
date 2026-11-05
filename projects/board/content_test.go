@@ -382,6 +382,52 @@ func TestDetailIncludeData(t *testing.T) {
 	}
 }
 
+func TestDataPrefixMirrorsAPIv2(t *testing.T) {
+	srv, c := contentServer(t, contentConfig{})
+	mod := mustPut(t, c, NodeInput{Type: NodeModule, Slug: "finance", Title: "理财"})
+	det := mustPut(t, c, NodeInput{ParentID: mod.ID, Type: NodeDetail, Slug: "digest-30-evening", Data: json.RawMessage(`{"run_id":30}`)})
+	mustPut(t, c, NodeInput{ParentID: det.ID, Type: NodeBlock, Slug: "conclusion", Data: json.RawMessage(`{"text":"不动"}`)})
+
+	for _, prefix := range []string{"/data", "/api/v2"} {
+		var mods NodePage
+		if r := getJSON(t, srv.URL+prefix+"/modules", &mods); r.StatusCode != 200 || mods.Total != 1 || mods.Items[0].Slug != "finance" {
+			t.Fatalf("%s/modules %d %+v", prefix, r.StatusCode, mods)
+		}
+		if r := getJSON(t, srv.URL+prefix+"/modules", nil); r.Header.Get("Access-Control-Allow-Origin") != "*" {
+			t.Fatalf("%s cors", prefix)
+		}
+		var list struct {
+			Module  Node
+			Details NodePage
+		}
+		if r := getJSON(t, srv.URL+prefix+"/finance?size=5", &list); r.StatusCode != 200 || list.Module.ID != mod.ID || list.Details.Total != 1 {
+			t.Fatalf("%s/finance %d %+v", prefix, r.StatusCode, list)
+		}
+		var one struct {
+			Detail Node
+			Blocks []Node
+		}
+		getJSON(t, srv.URL+prefix+"/finance/digest-30-evening?include=data", &one)
+		if one.Detail.ID != det.ID || len(one.Blocks) != 1 || string(one.Blocks[0].Data) != `{"text":"不动"}` {
+			t.Fatalf("%s detail %+v", prefix, one)
+		}
+		var b Node
+		if r := getJSON(t, srv.URL+prefix+"/finance/digest-30-evening/blocks/conclusion", &b); r.StatusCode != 200 || b.Slug != "conclusion" {
+			t.Fatalf("%s block %d %+v", prefix, r.StatusCode, b)
+		}
+		req, _ := http.NewRequest(http.MethodOptions, srv.URL+prefix+"/modules", nil)
+		res, _ := http.DefaultClient.Do(req)
+		if res.StatusCode != 204 || res.Header.Get("Access-Control-Allow-Methods") != "GET" {
+			t.Fatalf("%s preflight %d %v", prefix, res.StatusCode, res.Header)
+		}
+		for _, u := range []string{prefix + "/nope", prefix + "/finance/nope", prefix + "/a/b/c/d/e"} {
+			if r := getJSON(t, srv.URL+u, nil); r.StatusCode != 404 {
+				t.Fatalf("%s -> %d", u, r.StatusCode)
+			}
+		}
+	}
+}
+
 func TestTwoLevelNamedRoutes(t *testing.T) {
 	srv, c := contentServer(t, contentConfig{})
 	mod := mustPut(t, c, NodeInput{Type: NodeModule, Slug: "finance", Title: "理财"})

@@ -101,15 +101,32 @@ func pathID(r *http.Request, key string) (int64, bool) {
 	return id, err == nil && id > 0
 }
 
-// registerContentRoutes 注册 v2 只读接口与页面托管。浏览器侧路径带 /board 前缀，由 TLB 剥掉。
+// registerContentRoutes 注册只读内容接口与页面托管。
+// 新前缀 /data（pages 同域 nginx 剥掉 /api 后打到这里）；旧 /api/v2 过渡期保留（主站 TLB 仍剥 /board）。
 func registerContentRoutes(mux *http.ServeMux, c ContentStore, cfg contentConfig) {
-	mux.HandleFunc("OPTIONS /api/v2/", func(w http.ResponseWriter, _ *http.Request) {
+	registerDataAPI(mux, "/data", c)
+	registerDataAPI(mux, "/api/v2", c)
+
+	mux.HandleFunc("GET /pages/{rest...}", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.PagesHost != "" {
+			// 有独立域名时主域名不托管页面，避免与主站同源。
+			http.Redirect(w, r, "https://"+cfg.PagesHost+"/"+r.PathValue("rest"), http.StatusFound)
+			return
+		}
+		servePage(w, r, c, cfg, r.PathValue("rest"))
+	})
+}
+
+// registerDataAPI 在 prefix 下挂 modules / {module} / {module}/{slug} / blocks。
+// prefix 例：/data、/api/v2。字面 /modules 优先于 {module}；modules 已在 reservedModuleSlugs。
+func registerDataAPI(mux *http.ServeMux, prefix string, c ContentStore) {
+	mux.HandleFunc("OPTIONS "+prefix+"/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("GET /api/v2/modules", readCORS(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+prefix+"/modules", readCORS(func(w http.ResponseWriter, r *http.Request) {
 		page, size := queryPage(r)
 		p, err := c.ListChildren(0, NodeModule, page, size)
 		if err != nil {
@@ -118,10 +135,7 @@ func registerContentRoutes(mux *http.ServeMux, c ContentStore, cfg contentConfig
 		}
 		writeJSON(w, http.StatusOK, p)
 	}))
-
-	// 两级：/api/v2/{module}、/api/v2/{module}/{slug}、/api/v2/{module}/{slug}/blocks/{block}（按名字，不用 id）。
-	// 字面路由 /api/v2/modules 更具体，优先匹配；modules 已被 reservedModuleSlugs 保留。
-	mux.HandleFunc("GET /api/v2/{module}", readCORS(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+prefix+"/{module}", readCORS(func(w http.ResponseWriter, r *http.Request) {
 		m, err := c.FindChild(0, NodeModule, r.PathValue("module"))
 		if err != nil {
 			writeStoreErr(w, err)
@@ -135,14 +149,14 @@ func registerContentRoutes(mux *http.ServeMux, c ContentStore, cfg contentConfig
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"module": m, "details": p})
 	}))
-	mux.HandleFunc("GET /api/v2/{module}/{slug}", readCORS(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+prefix+"/{module}/{slug}", readCORS(func(w http.ResponseWriter, r *http.Request) {
 		d, ok := namedDetail(w, r, c)
 		if !ok {
 			return
 		}
 		writeDetail(w, r, c, d)
 	}))
-	mux.HandleFunc("GET /api/v2/{module}/{slug}/blocks/{block}", readCORS(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+prefix+"/{module}/{slug}/blocks/{block}", readCORS(func(w http.ResponseWriter, r *http.Request) {
 		d, ok := namedDetail(w, r, c)
 		if !ok {
 			return
@@ -154,19 +168,10 @@ func registerContentRoutes(mux *http.ServeMux, c ContentStore, cfg contentConfig
 		}
 		writeJSON(w, http.StatusOK, b)
 	}))
-	// 兜底：没匹配上的 GET 返回 JSON 404。之前只有 OPTIONS /api/v2/ 能匹配，错路径会变成 405（per-block 405 的根因）。
-	mux.HandleFunc("GET /api/v2/", readCORS(func(w http.ResponseWriter, r *http.Request) {
+	// 兜底：没匹配上的 GET 返回 JSON 404（避免错路径因 OPTIONS 兜底变成 405）。
+	mux.HandleFunc("GET "+prefix+"/", readCORS(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}))
-
-	mux.HandleFunc("GET /pages/{rest...}", func(w http.ResponseWriter, r *http.Request) {
-		if cfg.PagesHost != "" {
-			// 有独立域名时主域名不托管页面，避免与主站同源。
-			http.Redirect(w, r, "https://"+cfg.PagesHost+"/"+r.PathValue("rest"), http.StatusFound)
-			return
-		}
-		servePage(w, r, c, cfg, r.PathValue("rest"))
-	})
 }
 
 func queryPage(r *http.Request) (int, int) {

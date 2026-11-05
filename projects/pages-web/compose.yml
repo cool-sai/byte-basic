@@ -1,0 +1,17 @@
+# pages.lssl.work：本镜像内含 home/shell 构建产物 + nginx。
+# TLB：把 pages.lssl.work 上游从 board:8090 改到本服务 :80。
+services:
+  pages-web:
+    build:
+      context: ../..
+      dockerfile: projects/pages-web/Dockerfile
+    image: minikitex-pages-web:local
+    hostname: pages-web
+    environment:
+      TZ: Asia/Shanghai
+    expose:
+      - "80"
+    depends_on:
+      - board
+    restart: unless-stopped
+    pull_policy: never

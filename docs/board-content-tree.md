@@ -39,17 +39,26 @@ module（模块，如 finance）
 
 ## 2. 只读接口（公开，不鉴权，CORS `*`，仅 GET）
 
-浏览器路径带 `/board` 前缀（TLB 剥掉后进程内是 `/api/v2/...`）：
+**首选（B2）**：board 进程监听 `/data/...`。pages 同域前端写 `/api/data/...`，nginx 剥掉 `/api` 后反代到 board。
+
+| 浏览器（pages.lssl.work） | board 上游 |
+|---|---|
+| `GET /api/data/modules` | `GET /data/modules` |
+| `GET /api/data/{module}` | `GET /data/{module}` |
+| `GET /api/data/{module}/{slug}?include=data` | `GET /data/{module}/{slug}?include=data` |
+| `GET /api/data/{module}/{slug}/blocks/{block}` | `GET /data/.../blocks/{block}` |
+
+**过渡期仍可用**：主站 `https://lssl.work/board/api/v2/...`（TLB 剥 `/board` → 进程内 `/api/v2/...`），与 `/data` 同语义。
 
 | 接口 | 返回 |
 |---|---|
-| `GET /board/api/v2/modules?page=&size=` | 模块分页（首页导航用） |
-| `GET /board/api/v2/{module}?page=&size=` | `{module, details}`，模块下的详情，新到旧，size 默认 20、最大 100，不含区块 |
-| `GET /board/api/v2/{module}/{slug}` | `{detail, blocks}`；blocks 只有清单，不含 data |
-| `GET /board/api/v2/{module}/{slug}?include=data` | 同上，但每个区块都带 data，一次拿全（每 100 个区块一条查询，最多 1000 个）。`include` 只认 `data` |
-| `GET /board/api/v2/{module}/{slug}/blocks/{block}` | 单个区块，含 data |
+| `GET …/modules?page=&size=` | 模块分页（首页导航用） |
+| `GET …/{module}?page=&size=` | `{module, details}`，模块下的详情，新到旧，size 默认 20、最大 100，不含区块 |
+| `GET …/{module}/{slug}` | `{detail, blocks}`；blocks 只有清单，不含 data |
+| `GET …/{module}/{slug}?include=data` | 同上，但每个区块都带 data，一次拿全（每 100 个区块一条查询，最多 1000 个）。`include` 只认 `data` |
+| `GET …/{module}/{slug}/blocks/{block}` | 单个区块，含 data |
 
-全部按名字（slug），不用数字 id。不存在、已删除、路径不对，一律 JSON 404（以前错路径会因为 `OPTIONS /api/v2/` 兜底变成 405）。
+全部按名字（slug），不用数字 id。不存在、已删除、路径不对，一律 JSON 404（以前错路径会因为 OPTIONS 兜底变成 405）。
 
 ## 3. MCP 写工具（`https://lssl.work/board/mcp`，Bearer token）
 
