@@ -1,7 +1,11 @@
 import Mustache from "mustache"
 import DOMPurify from "isomorphic-dompurify"
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { api } from "@/shared/lib/api"
+import { decorateContext } from "./template-extras"
+
+/** 详情页把区块视图塞进来，:::render 的模板可以 {{#blocks}}。 */
+export const TemplateExtras = createContext<Record<string, unknown>>({})
 
 /** 本页生命周期内缓存模板 HTML（按 slug）。 */
 const templateCache = new Map<string, Promise<string>>()
@@ -58,6 +62,7 @@ type Props = {
 /** 查库 HTML 模板 → Mustache 填数据 → DOMPurify → 插入（无 eval，CSP 安全）。 */
 export function BoardTemplateRender({ template = "", children }: Props) {
   const context = useMemo(() => childrenToText(children), [children])
+  const extras = useContext(TemplateExtras)
   const [html, setHtml] = useState<string | null>(null)
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading")
   const [message, setMessage] = useState("")
@@ -79,7 +84,7 @@ export function BoardTemplateRender({ template = "", children }: Props) {
       }
       try {
         const tpl = await loadTemplateHtml(name)
-        const ctx = parseContext(context)
+        const ctx = decorateContext(parseContext(context), extras)
         const rendered = Mustache.render(tpl, ctx)
         const clean = DOMPurify.sanitize(rendered)
         if (!cancelled) {
@@ -98,7 +103,7 @@ export function BoardTemplateRender({ template = "", children }: Props) {
     return () => {
       cancelled = true
     }
-  }, [template, context])
+  }, [template, context, extras])
 
   if (status === "loading") {
     return <p className="my-2 text-sm text-muted-foreground">加载模板…</p>

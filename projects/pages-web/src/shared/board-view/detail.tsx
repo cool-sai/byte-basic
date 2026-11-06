@@ -39,7 +39,7 @@ export function GenericDetailPage() {
     )
   }
 
-  const { detail } = st.data
+  const { detail, blocks } = st.data
   const d = detail.data ?? {}
   const date = typeof d.date === "string" ? d.date : ""
 
@@ -57,7 +57,7 @@ export function GenericDetailPage() {
       {d.summary && typeof d.summary === "string" && (
         <p className="mb-6 text-base text-muted-foreground">{d.summary}</p>
       )}
-      <DetailBody data={d} />
+      <DetailBody data={d} blocks={blocks} />
     </PageShell>
   )
 }

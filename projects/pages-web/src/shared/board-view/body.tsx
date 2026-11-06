@@ -1,13 +1,15 @@
 import { ExternalLink } from "lucide-react"
-import type { Components } from "react-markdown"
-import ReactMarkdown from "react-markdown"
+import { useMemo } from "react"
+import ReactMarkdown, { type Components } from "react-markdown"
 import remarkDirective from "remark-directive"
 import remarkGfm from "remark-gfm"
 import { SectionTitle } from "@/shared/layout"
+import type { Node } from "@/shared/lib/api"
 import { EmptyState } from "@/shared/states"
 import { Card } from "@/shared/ui/card"
 import { remarkRenderDirective } from "./remark-render-directive"
-import { BoardTemplateRender } from "./template-render"
+import { templateExtras } from "./template-extras"
+import { BoardTemplateRender, TemplateExtras } from "./template-render"
 import { markdownOf, type GenericDetailData, type GenericSection } from "./types"
 
 const mdClass = [
@@ -74,19 +76,22 @@ function SectionsBody({ sections }: { sections: GenericSection[] }) {
   )
 }
 
-/** 详情正文：md/content → GFM + :::render；否则 sections[]；再否则 summary / 空。 */
-export function DetailBody({ data }: { data?: GenericDetailData }) {
+/** 详情正文：md/content → GFM + :::render。有区块时区块数据一并交给模板。 */
+export function DetailBody({ data, blocks = [] }: { data?: GenericDetailData; blocks?: Node[] }) {
+  const extras = useMemo(() => templateExtras(data, blocks), [data, blocks])
   const md = markdownOf(data)
   if (md) {
     return (
-      <div className={mdClass}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkDirective, remarkRenderDirective]}
-          components={mdComponents}
-        >
-          {md}
-        </ReactMarkdown>
-      </div>
+      <TemplateExtras.Provider value={extras}>
+        <div className={mdClass}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkDirective, remarkRenderDirective]}
+            components={mdComponents}
+          >
+            {md}
+          </ReactMarkdown>
+        </div>
+      </TemplateExtras.Provider>
     )
   }
   if (data?.sections?.length) return <SectionsBody sections={data.sections} />
